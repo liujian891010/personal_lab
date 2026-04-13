@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from hashlib import sha1
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,11 +20,41 @@ def _resolve_path(env_name: str, default_relative: str) -> Path:
     return candidate.resolve()
 
 
+def _resolve_additional_paths(env_name: str) -> list[Path]:
+    """解析额外的报告根路径列表，支持多个路径用逗号分隔"""
+    raw_value = os.getenv(env_name, "")
+    if not raw_value:
+        return []
+    paths = []
+    for part in raw_value.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        candidate = Path(part)
+        if not candidate.is_absolute():
+            candidate = PROJECT_ROOT / candidate
+        paths.append(candidate.resolve())
+    return paths
+
+
+def report_root_key(root: Path) -> str:
+    digest = sha1(str(root.resolve()).encode("utf-8")).hexdigest()[:12]
+    return f"ext-{digest}"
+
+
+def encode_report_storage_path(*, root: Path, relative_path: str, primary_root: Path) -> str:
+    normalized_relative_path = relative_path.replace("\\", "/").lstrip("/")
+    if root.resolve() == primary_root.resolve():
+        return normalized_relative_path
+    return f"@{report_root_key(root)}/{normalized_relative_path}"
+
+
 @dataclass(frozen=True)
 class Settings:
     project_root: Path
     raw_root: Path
     reports_root: Path
+    additional_report_roots: list[Path]
     knowledge_root: Path
     data_root: Path
     logs_root: Path
@@ -39,6 +70,7 @@ def get_settings() -> Settings:
         project_root=PROJECT_ROOT,
         raw_root=_resolve_path("RAW_ROOT", "raw"),
         reports_root=_resolve_path("REPORTS_ROOT", "reports"),
+        additional_report_roots=_resolve_additional_paths("ADDITIONAL_REPORT_ROOTS"),
         knowledge_root=_resolve_path("KNOWLEDGE_ROOT", "knowledge"),
         data_root=data_root,
         logs_root=_resolve_path("LOGS_ROOT", "logs"),

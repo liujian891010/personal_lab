@@ -2,9 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..config import settings
 from ..db import db_manager, row_to_dict
-from .file_service import read_text
+from .file_service import read_report_text
 
 
 class ReportService:
@@ -105,7 +104,7 @@ class ReportService:
                     (report_id,),
                 ).fetchall()
             ]
-            item["content"] = read_text(settings.reports_root, item["file_path"])
+            item["content"] = read_report_text(item["file_path"])
             return item
 
     def get_report_raw(self, report_id: str) -> str | None:
@@ -113,7 +112,7 @@ class ReportService:
             row = connection.execute("SELECT file_path FROM reports WHERE report_id = ?", (report_id,)).fetchone()
             if row is None:
                 return None
-            return read_text(settings.reports_root, row["file_path"])
+            return read_report_text(row["file_path"])
 
     def _load_tags(self, connection, report_ids: list[str]) -> dict[str, list[str]]:
         if not report_ids:

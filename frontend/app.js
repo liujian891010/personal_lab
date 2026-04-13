@@ -168,19 +168,76 @@ function stripFrontmatter(content) {
   return text.slice(end + 5).trim();
 }
 
+function renderInlineMarkdown(text) {
+  const placeholders = [];
+  const stash = (html) => {
+    const token = `__MD_TOKEN_${placeholders.length}__`;
+    placeholders.push(html);
+    return token;
+  };
+
+  let rendered = escapeHtml(String(text ?? ""));
+
+  rendered = rendered.replace(/`([^`]+)`/g, (_, code) => stash(`<code>${escapeHtml(code)}</code>`));
+  rendered = rendered.replace(
+    /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]+)")?\)/g,
+    (_, alt, src, title) =>
+      stash(
+        `<img src="${escapeHtml(src)}" alt="${escapeHtml(alt)}"${title ? ` title="${escapeHtml(title)}"` : ""} />`
+      )
+  );
+  rendered = rendered.replace(
+    /\[([^\]]+)\]\(([^)\s]+)(?:\s+"([^"]+)")?\)/g,
+    (_, label, href, title) =>
+      stash(
+        `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer"${title ? ` title="${escapeHtml(title)}"` : ""}>${escapeHtml(label)}</a>`
+      )
+  );
+  rendered = rendered.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+  rendered = rendered.replace(/(^|[^\*])\*([^*]+)\*(?!\*)/g, "$1<em>$2</em>");
+  rendered = rendered.replace(/~~([^~]+)~~/g, "<del>$1</del>");
+
+  placeholders.forEach((html, index) => {
+    rendered = rendered.replace(`__MD_TOKEN_${index}__`, html);
+  });
+
+  return rendered;
+}
+
+function isTableRow(line) {
+  const trimmed = line.trim();
+  return trimmed.startsWith("|") && trimmed.endsWith("|");
+}
+
+function isTableDivider(line) {
+  return /^\|?(\s*:?-{3,}:?\s*\|)+\s*:?-{3,}:?\s*\|?$/.test(line.trim());
+}
+
+function splitTableCells(line) {
+  return line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/\|$/, "")
+    .split("|")
+    .map((cell) => cell.trim());
+}
+
 function renderMarkdownLite(markdown) {
   const source = String(markdown ?? "").replace(/\r\n/g, "\n");
   const lines = source.split("\n");
   let html = "";
-  let inList = false;
+  let listType = null;
   let inCode = false;
   let codeBuffer = [];
+  let paragraphBuffer = [];
+  let blockquoteBuffer = [];
 
-  const closeList = () => {
-    if (inList) {
-      html += "</ul>";
-      inList = false;
+  const flushParagraph = () => {
+    if (!paragraphBuffer.length) {
+      return;
     }
+    html += `<p>${renderInlineMarkdown(paragraphBuffer.join(" "))}</p>`;
+    paragraphBuffer = [];
   };
 
   const closeCode = () => {
@@ -191,12 +248,37 @@ function renderMarkdownLite(markdown) {
     }
   };
 
-  for (const line of lines) {
+  const closeList = () => {
+    if (!listType) {
+      return;
+    }
+    html += listType === "ol" ? "</ol>" : "</ul>";
+    listType = null;
+  };
+
+  const flushBlockquote = () => {
+    if (!blockquoteBuffer.length) {
+      return;
+    }
+    html += `<blockquote>${blockquoteBuffer.map((line) => `<p>${renderInlineMarkdown(line)}</p>`).join("")}</blockquote>`;
+    blockquoteBuffer = [];
+  };
+
+  const flushAll = () => {
+    flushParagraph();
+    flushBlockquote();
+    closeList();
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
     if (line.startsWith("```")) {
+      flushAll();
       if (inCode) {
         closeCode();
       } else {
-        closeList();
         inCode = true;
       }
       continue;
@@ -207,40 +289,85 @@ function renderMarkdownLite(markdown) {
       continue;
     }
 
-    if (!line.trim()) {
-      closeList();
+    if (!trimmed) {
+      flushAll();
       continue;
     }
 
-    if (line.startsWith("### ")) {
-      closeList();
-      html += `<h3>${escapeHtml(line.slice(4))}</h3>`;
-      continue;
-    }
-    if (line.startsWith("## ")) {
-      closeList();
-      html += `<h2>${escapeHtml(line.slice(3))}</h2>`;
-      continue;
-    }
-    if (line.startsWith("# ")) {
-      closeList();
-      html += `<h1>${escapeHtml(line.slice(2))}</h1>`;
-      continue;
-    }
-    if (line.startsWith("- ")) {
-      if (!inList) {
-        html += "<ul>";
-        inList = true;
+    if (isTableRow(line) && index + 1 < lines.length && isTableDivider(lines[index + 1])) {
+      flushAll();
+      const headerCells = splitTableCells(line);
+      index += 2;
+      const bodyRows = [];
+      while (index < lines.length && isTableRow(lines[index])) {
+        bodyRows.push(splitTableCells(lines[index]));
+        index += 1;
       }
-      html += `<li>${escapeHtml(line.slice(2))}</li>`;
+      index -= 1;
+      html += `
+        <table class="markdown-table">
+          <thead><tr>${headerCells.map((cell) => `<th>${renderInlineMarkdown(cell)}</th>`).join("")}</tr></thead>
+          <tbody>
+            ${bodyRows.map((row) => `<tr>${row.map((cell) => `<td>${renderInlineMarkdown(cell)}</td>`).join("")}</tr>`).join("")}
+          </tbody>
+        </table>
+      `;
       continue;
     }
 
+    const headingMatch = trimmed.match(/^(#{1,6})\s+(.+)$/);
+    if (headingMatch) {
+      flushAll();
+      const level = Math.min(headingMatch[1].length, 6);
+      html += `<h${level}>${renderInlineMarkdown(headingMatch[2])}</h${level}>`;
+      continue;
+    }
+
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      flushAll();
+      html += "<hr />";
+      continue;
+    }
+
+    if (trimmed.startsWith("> ")) {
+      flushParagraph();
+      closeList();
+      blockquoteBuffer.push(trimmed.slice(2).trim());
+      continue;
+    }
+
+    const orderedMatch = trimmed.match(/^(\d+)\.\s+(.+)$/);
+    if (orderedMatch) {
+      flushParagraph();
+      flushBlockquote();
+      if (listType !== "ol") {
+        closeList();
+        html += "<ol>";
+        listType = "ol";
+      }
+      html += `<li>${renderInlineMarkdown(orderedMatch[2])}</li>`;
+      continue;
+    }
+
+    const unorderedMatch = trimmed.match(/^[-*+]\s+(.+)$/);
+    if (unorderedMatch) {
+      flushParagraph();
+      flushBlockquote();
+      if (listType !== "ul") {
+        closeList();
+        html += "<ul>";
+        listType = "ul";
+      }
+      html += `<li>${renderInlineMarkdown(unorderedMatch[1])}</li>`;
+      continue;
+    }
+
+    flushBlockquote();
     closeList();
-    html += `<p>${escapeHtml(line)}</p>`;
+    paragraphBuffer.push(trimmed);
   }
 
-  closeList();
+  flushAll();
   closeCode();
   return html || "<p class=\"subtle\">No content.</p>";
 }
@@ -475,17 +602,42 @@ async function renderReportDetail(reportId) {
           <div class="markdown-body">${content}</div>
         </article>
         <aside class="detail-stack">
-          <section class="detail-shell detail-meta">
+          <section class="detail-shell detail-meta report-detail-meta">
             <div class="meta-row">
               ${badge(data.status, toneForStatus(data.status))}
               ${badge(data.source_domain)}
               ${badge(data.skill_name)}
             </div>
-            <div class="meta-block"><div class="inline-kv"><strong>Report ID</strong><code>${escapeHtml(data.report_id)}</code></div></div>
-            <div class="meta-block"><div class="inline-kv"><strong>Source Ref</strong><code>${escapeHtml(data.source_ref)}</code></div></div>
-            <div class="meta-block"><div class="inline-kv"><strong>Generated At</strong><span>${escapeHtml(formatDateTime(data.generated_at))}</span></div></div>
-            <div class="meta-block"><div class="inline-kv"><strong>Updated At</strong><span>${escapeHtml(formatDateTime(data.updated_at))}</span></div></div>
-            <div class="chip-row">${(data.tags || []).map((value) => chip(value)).join("")}</div>
+            <div class="report-info-grid">
+              <div class="meta-block meta-block-compact report-info-card">
+                <div class="inline-kv inline-kv-compact">
+                  <strong>Report ID</strong>
+                  <code>${escapeHtml(data.report_id)}</code>
+                </div>
+              </div>
+              <div class="meta-block meta-block-compact report-info-card">
+                <div class="inline-kv inline-kv-compact">
+                  <strong>Generated At</strong>
+                  <span>${escapeHtml(formatDateTime(data.generated_at))}</span>
+                </div>
+              </div>
+              <div class="meta-block meta-block-compact report-info-card">
+                <div class="inline-kv inline-kv-compact">
+                  <strong>Updated At</strong>
+                  <span>${escapeHtml(formatDateTime(data.updated_at))}</span>
+                </div>
+              </div>
+              <div class="meta-block meta-block-compact report-info-card report-info-card-wide">
+                <div class="inline-kv inline-kv-compact">
+                  <strong>Source Ref</strong>
+                  <code>${escapeHtml(data.source_ref)}</code>
+                </div>
+              </div>
+            </div>
+            <div class="report-tag-panel">
+              <p class="field-label">Tags</p>
+              <div class="chip-row report-tag-row">${(data.tags || []).map((value) => chip(value)).join("")}</div>
+            </div>
           </section>
           <section class="detail-shell">
             <h3>Extracted Links</h3>

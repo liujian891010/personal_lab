@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from ..config import settings
+from ..config import encode_report_storage_path
 from ..db import db_manager
 from ..indexing.scanner import scan_markdown_files
 from .metadata_service import ReportDocument, normalize_tag, parse_report_file
@@ -41,18 +42,38 @@ class SyncService:
             result = SyncResult(job_id=job_id, mode=mode)
 
             try:
-                files = scan_markdown_files(settings.reports_root, skip_top_level_dirs={"failed"})
+                # Scan both primary reports_root and additional_report_roots
+                all_roots = [settings.reports_root] + settings.additional_report_roots
+                files = scan_markdown_files(all_roots, skip_top_level_dirs={"failed"})
                 result.scanned_count = len(files)
+
+                # Build a lookup: which root does each file belong to?
+                root_for_file: dict[Path, Path] = {}
+                for root in all_roots:
+                    if not root.exists():
+                        continue
+                    for path in root.rglob("*.md"):
+                        root_for_file[path] = root
 
                 documents: list[ReportDocument] = []
                 for file_path in files:
                     try:
-                        documents.append(parse_report_file(file_path, settings.reports_root))
+                        doc_root = root_for_file.get(file_path, settings.reports_root)
+                        document = parse_report_file(file_path, doc_root)
+                        storage_path = encode_report_storage_path(
+                            root=doc_root,
+                            relative_path=document.file_path,
+                            primary_root=settings.reports_root,
+                        )
+                        document.file_path = storage_path
+                        documents.append(document)
                     except Exception as exc:  # noqa: BLE001
                         result.failed_count += 1
+                        # Use the resolved root for relative path calculation
+                        doc_root = root_for_file.get(file_path, settings.reports_root)
                         result.warnings.append(
                             {
-                                "path": file_path.relative_to(settings.reports_root).as_posix(),
+                                "path": file_path.relative_to(doc_root).as_posix(),
                                 "message": str(exc),
                             }
                         )
