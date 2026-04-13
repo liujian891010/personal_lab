@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 data/
 logs/
+.env
+raw/
+reports/
+uploads/

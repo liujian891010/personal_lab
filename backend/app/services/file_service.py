@@ -29,6 +29,41 @@ def read_text(root: Path, relative_path: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def resolve_upload_storage_path(storage_path: str) -> Path:
+    normalized = storage_path.replace("\\", "/").lstrip("/")
+    return resolve_safe_path(settings.uploads_root, normalized)
+
+
+def resolve_upload_inbox_path(relative_path: str) -> Path:
+    normalized = relative_path.replace("\\", "/").lstrip("/")
+    return resolve_safe_path(settings.upload_inbox_root, normalized)
+
+
+def resolve_upload_working_path(relative_path: str) -> Path:
+    normalized = relative_path.replace("\\", "/").lstrip("/")
+    return resolve_safe_path(settings.upload_working_root, normalized)
+
+
+def resolve_upload_processed_path(relative_path: str) -> Path:
+    normalized = relative_path.replace("\\", "/").lstrip("/")
+    return resolve_safe_path(settings.upload_processed_root, normalized)
+
+
+def resolve_upload_failed_path(relative_path: str) -> Path:
+    normalized = relative_path.replace("\\", "/").lstrip("/")
+    return resolve_safe_path(settings.upload_failed_root, normalized)
+
+
+def resolve_raw_upload_path(relative_path: str) -> Path:
+    normalized = relative_path.replace("\\", "/").lstrip("/")
+    return resolve_safe_path(settings.raw_uploads_root, normalized)
+
+
+def read_upload_text(storage_path: str) -> str:
+    path = resolve_upload_storage_path(storage_path)
+    return path.read_text(encoding="utf-8")
+
+
 def resolve_report_storage_path(storage_path: str) -> Path:
     normalized = storage_path.replace("\\", "/")
     if normalized.startswith("@"):

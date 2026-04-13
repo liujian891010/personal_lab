@@ -16,6 +16,10 @@
 7. `07_governance_and_lint.md`
 8. `08_frontend_and_delivery.md`
 
+## 扩展设计
+
+- `09_upload_center_mvp_design.md`
+
 ## 分阶段原则
 
 - 先稳定底座：配置、目录、数据库、路径约束、同步机制。

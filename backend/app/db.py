@@ -27,7 +27,32 @@ class DatabaseManager:
         schema_sql = self.schema_path.read_text(encoding="utf-8")
         with self.connect() as connection:
             connection.executescript(schema_sql)
+            self._apply_post_schema_migrations(connection)
             connection.commit()
+
+    def _apply_post_schema_migrations(self, connection: sqlite3.Connection) -> None:
+        self._ensure_column(
+            connection,
+            table_name="upload_jobs",
+            column_name="auto_process",
+            column_sql="INTEGER NOT NULL DEFAULT 0",
+        )
+
+    def _ensure_column(
+        self,
+        connection: sqlite3.Connection,
+        *,
+        table_name: str,
+        column_name: str,
+        column_sql: str,
+    ) -> None:
+        rows = connection.execute(f"PRAGMA table_info({table_name})").fetchall()
+        if not rows:
+            return
+        existing = {str(row["name"]) for row in rows}
+        if column_name in existing:
+            return
+        connection.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_sql}")
 
     @contextmanager
     def session(self) -> Iterator[sqlite3.Connection]:

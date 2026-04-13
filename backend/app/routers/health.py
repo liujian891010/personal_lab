@@ -41,7 +41,28 @@ def get_health() -> HealthResponse:
         database_path=str(settings.sqlite_path),
         database_ready=database_ready,
         raw_root=DirectoryStatus(path=str(settings.raw_root), exists=settings.raw_root.exists()),
+        raw_uploads_root=DirectoryStatus(
+            path=str(settings.raw_uploads_root),
+            exists=settings.raw_uploads_root.exists(),
+        ),
         reports_root=DirectoryStatus(path=str(settings.reports_root), exists=settings.reports_root.exists()),
         knowledge_root=DirectoryStatus(path=str(settings.knowledge_root), exists=settings.knowledge_root.exists()),
+        uploads_root=DirectoryStatus(path=str(settings.uploads_root), exists=settings.uploads_root.exists()),
+        upload_inbox_root=DirectoryStatus(
+            path=str(settings.upload_inbox_root),
+            exists=settings.upload_inbox_root.exists(),
+        ),
+        upload_working_root=DirectoryStatus(
+            path=str(settings.upload_working_root),
+            exists=settings.upload_working_root.exists(),
+        ),
+        upload_processed_root=DirectoryStatus(
+            path=str(settings.upload_processed_root),
+            exists=settings.upload_processed_root.exists(),
+        ),
+        upload_failed_root=DirectoryStatus(
+            path=str(settings.upload_failed_root),
+            exists=settings.upload_failed_root.exists(),
+        ),
         latest_sync=latest_sync,
     )

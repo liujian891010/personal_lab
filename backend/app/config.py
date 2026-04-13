@@ -5,8 +5,13 @@ from hashlib import sha1
 from dataclasses import dataclass
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+# Load .env file from project root
+load_dotenv(PROJECT_ROOT / ".env")
 
 
 def _resolve_path(env_name: str, default_relative: str) -> Path:
@@ -21,7 +26,7 @@ def _resolve_path(env_name: str, default_relative: str) -> Path:
 
 
 def _resolve_additional_paths(env_name: str) -> list[Path]:
-    """解析额外的报告根路径列表，支持多个路径用逗号分隔"""
+    """解析额外的报告根路径列表，支持多个路径用逗号分隔，支持环境变量如 ${HOME}"""
     raw_value = os.getenv(env_name, "")
     if not raw_value:
         return []
@@ -30,10 +35,15 @@ def _resolve_additional_paths(env_name: str) -> list[Path]:
         part = part.strip()
         if not part:
             continue
-        candidate = Path(part)
-        if not candidate.is_absolute():
-            candidate = PROJECT_ROOT / candidate
-        paths.append(candidate.resolve())
+        # 展开环境变量
+        expanded = os.path.expandvars(part)
+        candidate = Path(expanded)
+        if candidate.is_absolute():
+            resolved = candidate.resolve()
+        else:
+            # 相对路径：从 PROJECT_ROOT 计算
+            resolved = (PROJECT_ROOT / candidate).resolve()
+        paths.append(resolved)
     return paths
 
 
@@ -53,9 +63,15 @@ def encode_report_storage_path(*, root: Path, relative_path: str, primary_root: 
 class Settings:
     project_root: Path
     raw_root: Path
+    raw_uploads_root: Path
     reports_root: Path
     additional_report_roots: list[Path]
     knowledge_root: Path
+    uploads_root: Path
+    upload_inbox_root: Path
+    upload_working_root: Path
+    upload_processed_root: Path
+    upload_failed_root: Path
     data_root: Path
     logs_root: Path
     sqlite_path: Path
@@ -66,12 +82,20 @@ class Settings:
 
 def get_settings() -> Settings:
     data_root = _resolve_path("DATA_ROOT", "data")
+    raw_root = _resolve_path("RAW_ROOT", "raw")
+    uploads_root = _resolve_path("UPLOADS_ROOT", "uploads")
     return Settings(
         project_root=PROJECT_ROOT,
-        raw_root=_resolve_path("RAW_ROOT", "raw"),
+        raw_root=raw_root,
+        raw_uploads_root=_resolve_path("RAW_UPLOADS_ROOT", str(raw_root / "uploads")),
         reports_root=_resolve_path("REPORTS_ROOT", "reports"),
         additional_report_roots=_resolve_additional_paths("ADDITIONAL_REPORT_ROOTS"),
         knowledge_root=_resolve_path("KNOWLEDGE_ROOT", "knowledge"),
+        uploads_root=uploads_root,
+        upload_inbox_root=_resolve_path("UPLOAD_INBOX_ROOT", str(uploads_root / "inbox")),
+        upload_working_root=_resolve_path("UPLOAD_WORKING_ROOT", str(uploads_root / "working")),
+        upload_processed_root=_resolve_path("UPLOAD_PROCESSED_ROOT", str(uploads_root / "processed")),
+        upload_failed_root=_resolve_path("UPLOAD_FAILED_ROOT", str(uploads_root / "failed")),
         data_root=data_root,
         logs_root=_resolve_path("LOGS_ROOT", "logs"),
         sqlite_path=_resolve_path("SQLITE_PATH", str(data_root / "reports.db")),
@@ -85,8 +109,14 @@ settings = get_settings()
 def ensure_runtime_dirs(current_settings: Settings) -> None:
     for directory in (
         current_settings.raw_root,
+        current_settings.raw_uploads_root,
         current_settings.reports_root,
         current_settings.knowledge_root,
+        current_settings.uploads_root,
+        current_settings.upload_inbox_root,
+        current_settings.upload_working_root,
+        current_settings.upload_processed_root,
+        current_settings.upload_failed_root,
         current_settings.data_root,
         current_settings.logs_root,
     ):

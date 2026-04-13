@@ -156,6 +156,57 @@ function apiPost(path, payload) {
   return apiRequest(path, { method: "POST", body: JSON.stringify(payload) });
 }
 
+async function apiRequestText(path, options = {}) {
+  const response = await fetch(path, {
+    ...options,
+    headers: {
+      Accept: "text/plain, application/json",
+      ...(options.headers || {}),
+    },
+  });
+
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const payload = await response.json();
+      if (payload?.detail) {
+        detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
+      }
+    } catch (error) {
+      void error;
+    }
+    throw new Error(detail);
+  }
+
+  return response.text();
+}
+
+async function apiPostForm(path, formData) {
+  const response = await fetch(path, {
+    method: "POST",
+    body: formData,
+    headers: {
+      Accept: "application/json",
+    },
+  });
+
+  if (!response.ok) {
+    let detail = `${response.status} ${response.statusText}`;
+    try {
+      const payload = await response.json();
+      if (payload?.detail) {
+        detail = typeof payload.detail === "string" ? payload.detail : JSON.stringify(payload.detail);
+      }
+    } catch (error) {
+      void error;
+    }
+    throw new Error(detail);
+  }
+
+  const text = await response.text();
+  return text ? JSON.parse(text) : null;
+}
+
 function stripFrontmatter(content) {
   const text = String(content ?? "");
   if (!text.startsWith("---\n")) {
@@ -568,6 +619,285 @@ async function renderReportsView(route) {
   });
 
   bindHashForm("#report-filters", "/reports");
+}
+
+async function renderUploadsView(route) {
+  if (route.detail) {
+    await renderUploadDetail(route.detail);
+    return;
+  }
+
+  const page = Number(route.params.get("page") || "1");
+  const status = route.params.get("status") || "";
+  const stage = route.params.get("stage") || "";
+  const q = route.params.get("q") || "";
+
+  const data = await apiGet(
+    `/api/uploads?${serializeParams({ page, page_size: 18, status, stage, q })}`
+  );
+
+  const cards = (data.items || []).length
+    ? data.items
+        .map(
+          (item) => `
+            <article class="card">
+              <div class="meta-row">
+                ${badge(item.upload_status, toneForStatus(item.upload_status))}
+                ${badge(item.processing_stage, toneForStatus(item.processing_stage))}
+                ${badge(item.file_ext)}
+              </div>
+              <h3><a href="${buildHash(`/uploads/${encodeURIComponent(item.upload_id)}`)}">${escapeHtml(item.title || item.original_filename)}</a></h3>
+              <div class="inline-list subtle">
+                <span>${escapeHtml(item.original_filename)}</span>
+                <span>${escapeHtml(item.upload_id)}</span>
+              </div>
+              <div class="inline-list subtle">
+                <span>${escapeHtml(String(item.file_size_bytes))} bytes</span>
+                <span>${escapeHtml(formatDateTime(item.updated_at))}</span>
+              </div>
+              ${
+                item.report_id_ref
+                  ? `<div class="button-row">${linkButton(buildHash(`/reports/${encodeURIComponent(item.report_id_ref)}`), "Open Report")}</div>`
+                  : ""
+              }
+            </article>
+          `
+        )
+        .join("")
+    : `
+      <section class="empty-state">
+        <p class="eyebrow">Uploads</p>
+        <h3>还没有上传任务</h3>
+        <p class="page-copy">先上传一个文件，或者调整筛选条件后再看。</p>
+      </section>
+    `;
+
+  appNode.innerHTML = renderPageShell({
+    eyebrow: "Uploads",
+    title: "Upload Center",
+    copy: "接收本地文件，跟踪处理状态，并把结果推进到标准报告链路。",
+    toolbar: `
+      <section class="panel" style="margin-bottom: 18px;">
+        <form id="upload-form" class="form-grid two">
+          <label class="field" style="grid-column: 1 / -1;">
+            <span class="field-label">File</span>
+            <input name="file" type="file" required />
+          </label>
+          <label class="field">
+            <span class="field-label">Title</span>
+            <input name="title" placeholder="可选，默认用文件名" />
+          </label>
+          <label class="field">
+            <span class="field-label">Compile Mode</span>
+            <select name="compile_mode">
+              <option value="">none</option>
+              <option value="propose">propose</option>
+              <option value="apply_safe">apply_safe</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Auto Process</span>
+            <select name="auto_process">
+              <option value="true">true</option>
+              <option value="false">false</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">Auto Compile</span>
+            <select name="auto_compile">
+              <option value="false">false</option>
+              <option value="true">true</option>
+            </select>
+          </label>
+          <div class="button-row">
+            <button class="button" type="submit">Upload File</button>
+          </div>
+        </form>
+      </section>
+      <form class="toolbar panel" id="upload-filters">
+        <label class="field">
+          <span class="field-label">Keyword</span>
+          <input name="q" value="${escapeHtml(q)}" placeholder="文件名 / 标题 / source_ref" />
+        </label>
+        <label class="field">
+          <span class="field-label">Status</span>
+          <select name="status">
+            <option value="">All</option>
+            ${["uploaded", "queued", "processing", "completed", "failed", "needs_review"]
+              .map((value) => `<option value="${value}" ${status === value ? "selected" : ""}>${value}</option>`)
+              .join("")}
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">Stage</span>
+          <select name="stage">
+            <option value="">All</option>
+            ${["received", "stored", "extracting", "normalizing", "summarizing", "report_generating", "syncing", "compiling", "done", "error"]
+              .map((value) => `<option value="${value}" ${stage === value ? "selected" : ""}>${value}</option>`)
+              .join("")}
+          </select>
+        </label>
+        <div class="button-row">
+          <button class="button" type="submit">Apply</button>
+          <button class="ghost-button" type="button" data-reset>Reset</button>
+        </div>
+      </form>
+    `,
+    body: `
+      <section class="card-grid">${cards}</section>
+      ${renderPagination({ path: "/uploads", page, pageSize: 18, total: data.total || 0, params: { status, stage, q } })}
+    `,
+  });
+
+  bindHashForm("#upload-filters", "/uploads");
+
+  document.querySelector("#upload-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = event.currentTarget;
+    const formData = new FormData(form);
+    const file = formData.get("file");
+    if (!(file instanceof File) || !file.name) {
+      showToast("请选择要上传的文件。", "bad");
+      return;
+    }
+
+    try {
+      const result = await apiPostForm("/api/uploads", formData);
+      showToast("上传任务已创建。", "good");
+      location.hash = buildHash(`/uploads/${encodeURIComponent(result.upload_id)}`);
+    } catch (error) {
+      showToast(error.message || "上传失败。", "bad");
+    }
+  });
+}
+
+async function renderUploadDetail(uploadId) {
+  const data = await apiGet(`/api/uploads/${encodeURIComponent(uploadId)}`);
+  const [rawText, reportPreview] = await Promise.all([
+    data.raw_preview_available
+      ? apiRequestText(`/api/uploads/${encodeURIComponent(uploadId)}/raw`).catch(() => "")
+      : Promise.resolve(""),
+    apiRequestText(`/api/uploads/${encodeURIComponent(uploadId)}/report-preview`).catch(() => ""),
+  ]);
+
+  const artifacts = (data.artifacts || []).length
+    ? data.artifacts
+        .map(
+          (item) => `
+            <div class="meta-block">
+              <div class="inline-kv">
+                <strong>${escapeHtml(item.artifact_kind)}</strong>
+                <code>${escapeHtml(item.file_path)}</code>
+              </div>
+            </div>
+          `
+        )
+        .join("")
+    : `<p class="subtle">No artifacts yet.</p>`;
+
+  appNode.innerHTML = renderPageShell({
+    eyebrow: "Uploads / Detail",
+    title: data.title || data.original_filename,
+    copy: data.source_ref,
+    body: `
+      <div class="button-row" style="margin-bottom: 16px;">
+        ${linkButton(buildHash("/uploads"), "返回 Upload 列表")}
+        ${data.report_id_ref ? linkButton(buildHash(`/reports/${encodeURIComponent(data.report_id_ref)}`), "Open Report") : ""}
+        ${data.upload_status !== "completed" ? `<button class="button" id="process-upload" type="button">Process</button>` : ""}
+        ${["failed", "needs_review"].includes(data.upload_status) ? `<button class="ghost-button" id="retry-upload" type="button">Retry</button>` : ""}
+      </div>
+      <section class="detail-grid">
+        <article class="detail-shell">
+          <div class="meta-row">
+            ${badge(data.upload_status, toneForStatus(data.upload_status))}
+            ${badge(data.processing_stage, toneForStatus(data.processing_stage))}
+            ${badge(data.file_ext)}
+          </div>
+          <div class="report-info-grid" style="margin-top: 12px;">
+            <div class="meta-block meta-block-compact report-info-card">
+              <div class="inline-kv inline-kv-compact">
+                <strong>Upload ID</strong>
+                <code>${escapeHtml(data.upload_id)}</code>
+              </div>
+            </div>
+            <div class="meta-block meta-block-compact report-info-card">
+              <div class="inline-kv inline-kv-compact">
+                <strong>File Size</strong>
+                <span>${escapeHtml(String(data.file_size_bytes))} bytes</span>
+              </div>
+            </div>
+            <div class="meta-block meta-block-compact report-info-card">
+              <div class="inline-kv inline-kv-compact">
+                <strong>Created</strong>
+                <span>${escapeHtml(formatDateTime(data.created_at))}</span>
+              </div>
+            </div>
+            <div class="meta-block meta-block-compact report-info-card">
+              <div class="inline-kv inline-kv-compact">
+                <strong>Updated</strong>
+                <span>${escapeHtml(formatDateTime(data.updated_at))}</span>
+              </div>
+            </div>
+            <div class="meta-block meta-block-compact report-info-card report-info-card-wide">
+              <div class="inline-kv inline-kv-compact">
+                <strong>Storage Path</strong>
+                <code>${escapeHtml(data.storage_path)}</code>
+              </div>
+            </div>
+          </div>
+          ${
+            data.error_message
+              ? `<div class="meta-block" style="margin-top: 14px;"><div class="inline-kv"><strong>Error</strong><span>${escapeHtml(data.error_code || "error")} | ${escapeHtml(data.error_message)}</span></div></div>`
+              : ""
+          }
+          <section style="margin-top: 18px;">
+            <h3>Raw Preview</h3>
+            <pre class="document-raw"><code>${escapeHtml(rawText || "No raw preview yet.")}</code></pre>
+          </section>
+          <section style="margin-top: 18px;">
+            <h3>Report Preview</h3>
+            <pre class="document-raw"><code>${escapeHtml(reportPreview || "No report preview yet.")}</code></pre>
+          </section>
+        </article>
+        <aside class="detail-stack">
+          <section class="detail-shell">
+            <h3>Processing</h3>
+            <div class="detail-stack">
+              <div class="meta-block"><div class="inline-kv"><strong>Source Type</strong><span>${escapeHtml(data.source_type)}</span></div></div>
+              <div class="meta-block"><div class="inline-kv"><strong>Auto Process</strong><span>${escapeHtml(String(data.auto_process))}</span></div></div>
+              <div class="meta-block"><div class="inline-kv"><strong>Auto Compile</strong><span>${escapeHtml(String(data.auto_compile))}</span></div></div>
+              <div class="meta-block"><div class="inline-kv"><strong>Compile Mode</strong><span>${escapeHtml(data.compile_mode || "-")}</span></div></div>
+              <div class="meta-block"><div class="inline-kv"><strong>Report</strong><span>${data.report_id_ref ? `<a href="${buildHash(`/reports/${encodeURIComponent(data.report_id_ref)}`)}">${escapeHtml(data.report_id_ref)}</a>` : "-"}</span></div></div>
+            </div>
+          </section>
+          <section class="detail-shell">
+            <h3>Artifacts</h3>
+            <div class="detail-stack">${artifacts}</div>
+          </section>
+        </aside>
+      </section>
+    `,
+  });
+
+  document.querySelector("#process-upload")?.addEventListener("click", async () => {
+    try {
+      await apiPost(`/api/uploads/${encodeURIComponent(uploadId)}/process`, {});
+      showToast("Upload processing completed.", "good");
+      await renderUploadDetail(uploadId);
+    } catch (error) {
+      showToast(error.message || "Process failed.", "bad");
+    }
+  });
+
+  document.querySelector("#retry-upload")?.addEventListener("click", async () => {
+    try {
+      await apiPost(`/api/uploads/${encodeURIComponent(uploadId)}/retry`, {});
+      showToast("Upload retry completed.", "good");
+      await renderUploadDetail(uploadId);
+    } catch (error) {
+      showToast(error.message || "Retry failed.", "bad");
+    }
+  });
 }
 
 async function renderReportDetail(reportId) {
@@ -1314,7 +1644,7 @@ async function renderNotFound() {
 
 async function renderRoute() {
   const route = getRoute();
-  const navSection = ["reports", "wiki", "ask", "tasks", "conflicts", "admin"].includes(route.section)
+  const navSection = ["uploads", "reports", "wiki", "ask", "tasks", "conflicts", "admin"].includes(route.section)
     ? route.section
     : "reports";
   setActiveNav(navSection);
@@ -1322,6 +1652,9 @@ async function renderRoute() {
 
   try {
     switch (route.section) {
+      case "uploads":
+        await renderUploadsView(route);
+        break;
       case "reports":
         await renderReportsView(route);
         break;

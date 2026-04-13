@@ -172,3 +172,57 @@ CREATE VIRTUAL TABLE IF NOT EXISTS wiki_search_index USING fts5(
     page_type,
     tokenize = 'unicode61'
 );
+
+CREATE TABLE IF NOT EXISTS upload_jobs (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    upload_id          TEXT NOT NULL UNIQUE,
+    original_filename  TEXT NOT NULL,
+    stored_filename    TEXT NOT NULL,
+    storage_path       TEXT NOT NULL UNIQUE,
+    mime_type          TEXT,
+    file_ext           TEXT NOT NULL,
+    file_size_bytes    INTEGER NOT NULL,
+    source_ref         TEXT NOT NULL UNIQUE,
+    source_type        TEXT NOT NULL DEFAULT 'upload_file',
+    title              TEXT,
+    upload_status      TEXT NOT NULL,
+    processing_stage   TEXT NOT NULL,
+    report_id_ref      TEXT UNIQUE,
+    auto_process       INTEGER NOT NULL DEFAULT 0,
+    compile_mode       TEXT,
+    auto_compile       INTEGER NOT NULL DEFAULT 0,
+    triggered_by       TEXT NOT NULL DEFAULT 'user_upload',
+    error_code         TEXT,
+    error_message      TEXT,
+    retry_count        INTEGER NOT NULL DEFAULT 0,
+    content_hash       TEXT,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL,
+    completed_at       TEXT,
+    FOREIGN KEY (report_id_ref) REFERENCES reports(report_id) ON DELETE SET NULL,
+    CHECK (source_type = 'upload_file'),
+    CHECK (upload_status IN ('uploaded', 'queued', 'processing', 'completed', 'failed', 'needs_review')),
+    CHECK (processing_stage IN ('received', 'stored', 'extracting', 'normalizing', 'summarizing', 'report_generating', 'syncing', 'compiling', 'done', 'error')),
+    CHECK (compile_mode IS NULL OR compile_mode IN ('propose', 'apply_safe')),
+    CHECK (auto_process IN (0, 1)),
+    CHECK (auto_compile IN (0, 1))
+);
+
+CREATE INDEX IF NOT EXISTS idx_upload_jobs_status ON upload_jobs(upload_status, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_upload_jobs_stage ON upload_jobs(processing_stage, updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_upload_jobs_created_at ON upload_jobs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_upload_jobs_report_id_ref ON upload_jobs(report_id_ref);
+
+CREATE TABLE IF NOT EXISTS upload_artifacts (
+    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+    upload_id_ref      TEXT NOT NULL REFERENCES upload_jobs(upload_id) ON DELETE CASCADE,
+    artifact_kind      TEXT NOT NULL,
+    file_path          TEXT NOT NULL,
+    content_hash       TEXT,
+    byte_size          INTEGER,
+    created_at         TEXT NOT NULL,
+    UNIQUE (upload_id_ref, artifact_kind, file_path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_upload_artifacts_upload_id_ref
+    ON upload_artifacts(upload_id_ref, artifact_kind);
