@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..db import db_manager, row_to_dict
+from .fts_utils import build_fts_query
 
 
 class SearchService:
@@ -17,9 +18,12 @@ class SearchService:
         limit: int = 20,
     ) -> dict[str, Any]:
         limit = min(max(limit, 1), 100)
+        fts_query = build_fts_query(q, limit=8)
+        if not fts_query:
+            return {"items": [], "total": 0, "took_ms": 0}
         joins: list[str] = []
         where_clauses = ["search_index MATCH ?"]
-        params: list[Any] = [q]
+        params: list[Any] = [fts_query]
 
         if tag:
             joins.append("JOIN report_tags rt ON rt.report_id_ref = r.report_id")

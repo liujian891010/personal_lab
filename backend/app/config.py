@@ -59,3 +59,6 @@ def ensure_runtime_dirs(current_settings: Settings) -> None:
         current_settings.logs_root,
     ):
         directory.mkdir(parents=True, exist_ok=True)
+
+    for subdir in ("entities", "concepts", "topics", "questions", "timelines", "conflicts", "digests"):
+        (current_settings.knowledge_root / subdir).mkdir(parents=True, exist_ok=True)
