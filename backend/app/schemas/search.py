@@ -12,6 +12,11 @@ class SearchItem(BaseModel):
     generated_at: str
     snippet: str
     score: float
+    status: str | None = None
+    skill_name: str | None = None
+    summary: str | None = None
+    folder_id_ref: str | None = None
+    folder_name_ref: str | None = None
 
 
 class SearchResponse(BaseModel):

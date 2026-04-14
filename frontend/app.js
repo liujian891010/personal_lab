@@ -475,6 +475,28 @@ function renderPageShell({ eyebrow, title, copy, toolbar = "", body }) {
   `;
 }
 
+function promptForFolderSelection(folders, currentFolderId = null) {
+  const options = ["(Unfiled)", ...folders.map((folder) => folder.folder_name)];
+  const currentIndex = currentFolderId ? folders.findIndex((folder) => folder.folder_id === currentFolderId) + 1 : 0;
+  const choice = window.prompt(
+    `Move report to:\n${options.map((option, index) => `${index}: ${option}`).join("\n")}\n\nEnter index:`,
+    String(Math.max(currentIndex, 0))
+  );
+  if (choice === null) {
+    return undefined;
+  }
+  const selectedIndex = Number(choice);
+  if (Number.isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= options.length) {
+    throw new Error("Invalid folder index.");
+  }
+  return selectedIndex === 0 ? null : folders[selectedIndex - 1].folder_id;
+}
+
+async function moveReportToFolder(reportId, folderId, successMessage = "Report moved.") {
+  await apiPost(`/api/reports/${encodeURIComponent(reportId)}/move-folder`, { folder_id: folderId });
+  showToast(successMessage, "good");
+}
+
 function _bindFolderNavEvents(folders, currentFolderId, unfiled, filterParams) {
   // new folder
   document.querySelector("#new-folder-btn")?.addEventListener("click", async () => {
@@ -531,19 +553,15 @@ function _bindFolderNavEvents(folders, currentFolderId, unfiled, filterParams) {
     btn.addEventListener("click", async (e) => {
       e.preventDefault();
       const reportId = btn.dataset.moveReport;
-      const options = ["(Unfiled)", ...folders.map((f) => f.folder_name)];
-      const choice = window.prompt(`移动"${btn.dataset.reportTitle}"到：\n${options.map((o, i) => `${i}: ${o}`).join("\n")}\n\n输入序号：`);
-      if (choice === null) return;
-      const idx = Number(choice);
-      if (Number.isNaN(idx) || idx < 0 || idx >= options.length) return;
-      const targetFolderId = idx === 0 ? null : folders[idx - 1].folder_id;
       try {
-        await apiPost(`/api/reports/${encodeURIComponent(reportId)}/move-folder`, { folder_id: targetFolderId });
-        showToast("已移动", "good");
+        const targetFolderId = promptForFolderSelection(folders, btn.dataset.currentFolderId || null);
+        if (targetFolderId === undefined) return;
+        await moveReportToFolder(reportId, targetFolderId, "已移动到目标文件夹");
         renderRoute();
       } catch (err) {
         showToast(err.message, "bad");
       }
+      return;
     });
   });
 
@@ -570,14 +588,14 @@ function _bindFolderNavEvents(folders, currentFolderId, unfiled, filterParams) {
       li.classList.remove("drop-target");
       const reportId = e.dataTransfer.getData("text/plain");
       if (!reportId) return;
-      const fid = li.dataset.folderId;
+      const targetFolderId = li.dataset.dropFolderId || li.dataset.folderId || null;
       try {
-        await apiPost(`/api/reports/${encodeURIComponent(reportId)}/move-folder`, { folder_id: fid });
-        showToast("已归档到文件夹", "good");
+        await moveReportToFolder(reportId, targetFolderId, targetFolderId ? "已归档到文件夹" : "已移回 Unfiled");
         renderRoute();
       } catch (err) {
         showToast(err.message, "bad");
       }
+      return;
     });
   });
 }
@@ -650,7 +668,7 @@ async function renderReportsView(route) {
         <li class="${!folderId && !unfiled ? "active" : ""}">
           <a href="${buildHash("/reports", { tag, source_domain: sourceDomain, status, skill_name: skillName })}">All Reports</a>
         </li>
-        <li class="${unfiled ? "active" : ""}">
+        <li class="folder-nav-item ${unfiled ? "active" : ""}" data-folder-id="">
           <a href="${buildHash("/reports", { unfiled: "true", tag, source_domain: sourceDomain, status, skill_name: skillName })}">Unfiled</a>
         </li>
         ${folders.map((f) => `
@@ -692,7 +710,7 @@ async function renderReportsView(route) {
                 <span>${escapeHtml(formatDateTime(item.generated_at))}</span>
               </div>
               <div class="button-row">
-                <button class="ghost-button" data-move-report="${escapeHtml(item.report_id)}" data-report-title="${escapeHtml(item.title)}">移动到文件夹</button>
+                <button class="ghost-button" data-move-report="${escapeHtml(item.report_id)}" data-current-folder-id="${escapeHtml(item.folder_id_ref || "")}" data-report-title="${escapeHtml(item.title)}">移动到文件夹</button>
               </div>
             </article>
           `;
@@ -1115,6 +1133,7 @@ async function renderUploadDetail(uploadId) {
             <h3>Processing</h3>
             <div class="detail-stack">
               <div class="meta-block"><div class="inline-kv"><strong>Source Type</strong><span>${escapeHtml(data.source_type)}</span></div></div>
+              <div class="meta-block"><div class="inline-kv"><strong>Folder</strong><span>${escapeHtml(data.folder_name_ref || "Unfiled")}</span></div></div>
               <div class="meta-block"><div class="inline-kv"><strong>Auto Process</strong><span>${escapeHtml(String(data.auto_process))}</span></div></div>
               <div class="meta-block"><div class="inline-kv"><strong>Auto Compile</strong><span>${escapeHtml(String(data.auto_compile))}</span></div></div>
               <div class="meta-block"><div class="inline-kv"><strong>Compile Mode</strong><span>${escapeHtml(data.compile_mode || "-")}</span></div></div>
@@ -1152,7 +1171,11 @@ async function renderUploadDetail(uploadId) {
 }
 
 async function renderReportDetail(reportId) {
-  const data = await apiGet(`/api/reports/${encodeURIComponent(reportId)}`);
+  const [data, foldersData] = await Promise.all([
+    apiGet(`/api/reports/${encodeURIComponent(reportId)}`),
+    apiGet("/api/report-folders"),
+  ]);
+  const folders = foldersData.items || [];
   const content = renderMarkdownLite(stripFrontmatter(data.content));
   const links = data.links?.length
     ? data.links
@@ -1227,6 +1250,35 @@ async function renderReportDetail(reportId) {
         </aside>
       </section>
     `,
+  });
+
+  document
+    .querySelector(".report-detail-meta .report-info-grid")
+    ?.insertAdjacentHTML(
+      "beforeend",
+      `
+        <div class="meta-block meta-block-compact report-info-card report-info-card-wide">
+          <div class="inline-kv inline-kv-compact">
+            <strong>Folder</strong>
+            <span>${escapeHtml(data.folder_name_ref || "Unfiled")}</span>
+          </div>
+        </div>
+      `
+    );
+
+  document
+    .querySelector('.button-row[style="margin-bottom: 16px;"]')
+    ?.insertAdjacentHTML("beforeend", '<button class="ghost-button" id="move-report-detail" type="button">移动到文件夹</button>');
+
+  document.querySelector("#move-report-detail")?.addEventListener("click", async () => {
+    try {
+      const targetFolderId = promptForFolderSelection(folders, data.folder_id_ref || null);
+      if (targetFolderId === undefined) return;
+      await moveReportToFolder(reportId, targetFolderId, "已更新报告归档");
+      await renderReportDetail(reportId);
+    } catch (error) {
+      showToast(error.message || "Move failed.", "bad");
+    }
   });
 }
 

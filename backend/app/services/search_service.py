@@ -51,11 +51,17 @@ class SearchService:
                     r.source_ref,
                     r.source_domain,
                     r.source_type,
+                    r.status,
+                    r.skill_name,
+                    r.summary,
                     r.generated_at,
+                    r.folder_id_ref,
+                    f.folder_name AS folder_name_ref,
                     snippet(search_index, 3, '<mark>', '</mark>', '...', 16) AS snippet,
                     bm25(search_index) AS score
                 FROM search_index s
                 JOIN reports r ON r.report_id = s.report_id
+                LEFT JOIN report_folders f ON f.folder_id = r.folder_id_ref
                 {join_sql}
                 {where_sql}
                 ORDER BY score
