@@ -16,6 +16,8 @@ class ReportService:
         source_domain: str | None = None,
         skill_name: str | None = None,
         status: str | None = None,
+        folder_id: str | None = None,
+        unfiled: bool = False,
     ) -> dict[str, Any]:
         page = max(page, 1)
         page_size = min(max(page_size, 1), 100)
@@ -38,18 +40,18 @@ class ReportService:
         if status:
             where_clauses.append("r.status = ?")
             params.append(status)
+        if folder_id:
+            where_clauses.append("r.folder_id_ref = ?")
+            params.append(folder_id)
+        elif unfiled:
+            where_clauses.append("r.folder_id_ref IS NULL")
 
         join_sql = " ".join(joins)
         where_sql = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
 
         with db_manager.session() as connection:
             total = connection.execute(
-                f"""
-                SELECT COUNT(DISTINCT r.report_id)
-                FROM reports r
-                {join_sql}
-                {where_sql}
-                """,
+                f"SELECT COUNT(DISTINCT r.report_id) FROM reports r {join_sql} {where_sql}",
                 params,
             ).fetchone()[0]
 
@@ -57,8 +59,11 @@ class ReportService:
                 f"""
                 SELECT DISTINCT
                     r.report_id, r.title, r.source_ref, r.source_url, r.source_domain,
-                    r.source_type, r.skill_name, r.generated_at, r.status, r.summary
+                    r.source_type, r.skill_name, r.generated_at, r.status, r.summary,
+                    r.folder_id_ref,
+                    f.folder_name AS folder_name_ref
                 FROM reports r
+                LEFT JOIN report_folders f ON f.folder_id = r.folder_id_ref
                 {join_sql}
                 {where_sql}
                 ORDER BY r.generated_at DESC
@@ -79,11 +84,13 @@ class ReportService:
             row = connection.execute(
                 """
                 SELECT
-                    report_id, file_path, title, source_ref, source_url, source_domain,
-                    source_type, skill_name, generated_at, author, status, language,
-                    summary, content_hash, body_size, created_at, updated_at
-                FROM reports
-                WHERE report_id = ?
+                    r.report_id, r.file_path, r.title, r.source_ref, r.source_url, r.source_domain,
+                    r.source_type, r.skill_name, r.generated_at, r.author, r.status, r.language,
+                    r.summary, r.content_hash, r.body_size, r.created_at, r.updated_at,
+                    r.folder_id_ref, f.folder_name AS folder_name_ref
+                FROM reports r
+                LEFT JOIN report_folders f ON f.folder_id = r.folder_id_ref
+                WHERE r.report_id = ?
                 """,
                 (report_id,),
             ).fetchone()

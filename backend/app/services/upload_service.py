@@ -68,6 +68,7 @@ class UploadService:
         compile_mode: str | None,
         title: str | None,
         tags: str | None,
+        folder_id: str | None = None,
     ) -> dict[str, Any]:
         original_filename = self._normalize_original_filename(upload_file.filename)
         file_ext = self._validate_file_extension(original_filename)
@@ -106,9 +107,9 @@ class UploadService:
                         title, upload_status, processing_stage, report_id_ref,
                         auto_process, compile_mode, auto_compile, triggered_by,
                         error_code, error_message, retry_count, content_hash,
-                        created_at, updated_at, completed_at
+                        created_at, updated_at, completed_at, folder_id_ref
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, ?, NULL)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, ?, NULL, ?)
                     """,
                     (
                         upload_id,
@@ -130,6 +131,7 @@ class UploadService:
                         content_hash,
                         now.isoformat(),
                         now.isoformat(),
+                        folder_id,
                     ),
                 )
                 self._upsert_artifact(
@@ -193,11 +195,13 @@ class UploadService:
             )
             rows = connection.execute(
                 f"""
-                SELECT upload_id, original_filename, title, source_ref, file_ext, file_size_bytes,
-                       upload_status, processing_stage, report_id_ref, retry_count, created_at, updated_at
-                FROM upload_jobs
+                SELECT uj.upload_id, uj.original_filename, uj.title, uj.source_ref, uj.file_ext, uj.file_size_bytes,
+                       uj.upload_status, uj.processing_stage, uj.report_id_ref, uj.retry_count, uj.created_at, uj.updated_at,
+                       uj.folder_id_ref, f.folder_name AS folder_name_ref
+                FROM upload_jobs uj
+                LEFT JOIN report_folders f ON f.folder_id = uj.folder_id_ref
                 {where_sql}
-                ORDER BY created_at DESC, id DESC
+                ORDER BY uj.created_at DESC, uj.id DESC
                 LIMIT ? OFFSET ?
                 """,
                 [*parameters, page_size, offset],
@@ -215,13 +219,15 @@ class UploadService:
         with db_manager.session() as connection:
             row = connection.execute(
                 """
-                SELECT upload_id, original_filename, title, stored_filename, storage_path, mime_type,
-                       file_ext, file_size_bytes, source_ref, source_type, upload_status,
-                       processing_stage, report_id_ref, auto_process, compile_mode, auto_compile,
-                       triggered_by, error_code, error_message, retry_count, content_hash,
-                       created_at, updated_at, completed_at
-                FROM upload_jobs
-                WHERE upload_id = ?
+                SELECT uj.upload_id, uj.original_filename, uj.title, uj.stored_filename, uj.storage_path, uj.mime_type,
+                       uj.file_ext, uj.file_size_bytes, uj.source_ref, uj.source_type, uj.upload_status,
+                       uj.processing_stage, uj.report_id_ref, uj.auto_process, uj.compile_mode, uj.auto_compile,
+                       uj.triggered_by, uj.error_code, uj.error_message, uj.retry_count, uj.content_hash,
+                       uj.created_at, uj.updated_at, uj.completed_at,
+                       uj.folder_id_ref, f.folder_name AS folder_name_ref
+                FROM upload_jobs uj
+                LEFT JOIN report_folders f ON f.folder_id = uj.folder_id_ref
+                WHERE uj.upload_id = ?
                 """,
                 (upload_id,),
             ).fetchone()
@@ -344,13 +350,23 @@ class UploadService:
 
             with db_manager.session() as connection:
                 connection.execute(
-                    """
-                    UPDATE upload_jobs
-                    SET report_id_ref = ?, updated_at = ?
-                    WHERE upload_id = ?
-                    """,
+                    "UPDATE upload_jobs SET report_id_ref = ?, updated_at = ? WHERE upload_id = ?",
                     (report_metadata["report_id"], self._now().isoformat(), upload_id),
                 )
+                # inherit folder from upload job
+                job_row = connection.execute(
+                    "SELECT folder_id_ref FROM upload_jobs WHERE upload_id = ?", (upload_id,)
+                ).fetchone()
+                if job_row and job_row["folder_id_ref"]:
+                    fid = job_row["folder_id_ref"]
+                    connection.execute(
+                        "UPDATE reports SET folder_id_ref = ?, updated_at = ? WHERE report_id = ?",
+                        (fid, self._now().isoformat(), report_metadata["report_id"]),
+                    )
+                    connection.execute(
+                        "UPDATE report_folders SET report_count = report_count + 1, updated_at = ? WHERE folder_id = ?",
+                        (self._now().isoformat(), fid),
+                    )
 
             compile_error_message: str | None = None
             if updated_auto_compile:
@@ -506,6 +522,8 @@ class UploadService:
             "retry_count": int(row["retry_count"]),
             "created_at": str(row["created_at"]),
             "updated_at": str(row["updated_at"]),
+            "folder_id_ref": row["folder_id_ref"],
+            "folder_name_ref": row["folder_name_ref"],
         }
 
     def _load_upload_job(self, connection: sqlite3.Connection, upload_id: str) -> sqlite3.Row:

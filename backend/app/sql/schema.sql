@@ -173,6 +173,21 @@ CREATE VIRTUAL TABLE IF NOT EXISTS wiki_search_index USING fts5(
     tokenize = 'unicode61'
 );
 
+CREATE TABLE IF NOT EXISTS report_folders (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    folder_id        TEXT NOT NULL UNIQUE,
+    folder_name      TEXT NOT NULL,
+    folder_slug      TEXT NOT NULL UNIQUE,
+    description      TEXT,
+    sort_order       INTEGER NOT NULL DEFAULT 0,
+    report_count     INTEGER NOT NULL DEFAULT 0,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL,
+    UNIQUE (folder_name COLLATE NOCASE)
+);
+
+CREATE INDEX IF NOT EXISTS idx_report_folders_slug ON report_folders(folder_slug);
+
 CREATE TABLE IF NOT EXISTS upload_jobs (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
     upload_id          TEXT NOT NULL UNIQUE,

@@ -4,6 +4,7 @@
 
 - `docs/REPORT_CENTER_MVP_DESIGN.md`
 - `docs/REPORT_CENTER_LLM_WIKI_V2_DESIGN.md`
+- `plan_list/report_folder_mvp_design/00_plan_index.md`
 
 ## 执行顺序
 

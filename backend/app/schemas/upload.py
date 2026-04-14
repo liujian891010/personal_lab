@@ -24,6 +24,8 @@ class UploadSummary(BaseModel):
     retry_count: int
     created_at: str
     updated_at: str
+    folder_id_ref: str | None = None
+    folder_name_ref: str | None = None
 
 
 class UploadListResponse(BaseModel):

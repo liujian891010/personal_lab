@@ -37,6 +37,26 @@ class DatabaseManager:
             column_name="auto_process",
             column_sql="INTEGER NOT NULL DEFAULT 0",
         )
+        self._ensure_column(
+            connection,
+            table_name="reports",
+            column_name="folder_id_ref",
+            column_sql="TEXT REFERENCES report_folders(folder_id) ON DELETE SET NULL",
+        )
+        self._ensure_column(
+            connection,
+            table_name="upload_jobs",
+            column_name="folder_id_ref",
+            column_sql="TEXT REFERENCES report_folders(folder_id) ON DELETE SET NULL",
+        )
+        # indexes for folder_id_ref (ignore errors if already exist)
+        for table in ("reports", "upload_jobs"):
+            try:
+                connection.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{table}_folder_id_ref ON {table}(folder_id_ref)"
+                )
+            except Exception:
+                pass
 
     def _ensure_column(
         self,

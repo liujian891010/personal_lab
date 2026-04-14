@@ -14,6 +14,7 @@ from .routers.reports import router as reports_router
 from .routers.search import router as search_router
 from .routers.sync import router as sync_router
 from .routers.uploads import router as uploads_router
+from .routers.folders import router as folders_router
 from .routers.wiki import router as wiki_router
 
 
@@ -33,6 +34,7 @@ app = FastAPI(
 app.include_router(health_router)
 app.include_router(sync_router)
 app.include_router(uploads_router)
+app.include_router(folders_router)
 app.include_router(reports_router)
 app.include_router(search_router)
 app.include_router(wiki_router)

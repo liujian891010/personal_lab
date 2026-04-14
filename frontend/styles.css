@@ -923,6 +923,101 @@ code {
   }
 }
 
+/* Folder workspace */
+.reports-workspace {
+  display: flex;
+  gap: 16px;
+  align-items: flex-start;
+}
+
+.folder-nav {
+  width: 200px;
+  flex-shrink: 0;
+}
+
+.folder-nav-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.folder-nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.folder-nav-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 4px;
+}
+
+.folder-nav-list li.active {
+  background: var(--surface-raised, #f0f0f0);
+  font-weight: 600;
+}
+
+.folder-nav-list li a {
+  flex: 1;
+  text-decoration: none;
+  color: inherit;
+  font-size: 0.875rem;
+}
+
+.folder-nav-list li:hover {
+  background: var(--surface-raised, #f0f0f0);
+}
+
+.folder-count {
+  font-size: 0.75rem;
+}
+
+.folder-actions {
+  display: none;
+  gap: 2px;
+}
+
+.folder-nav-list li:hover .folder-actions {
+  display: flex;
+}
+
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 0.75rem;
+  color: var(--text-subtle, #888);
+  border-radius: 3px;
+}
+
+.icon-btn:hover {
+  background: var(--surface-border, #ddd);
+}
+
+.reports-main {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Drag and drop */
+article.card[draggable="true"] {
+  cursor: grab;
+}
+
+article.card.dragging {
+  opacity: 0.5;
+}
+
+.folder-nav-item.drop-target {
+  background: var(--accent-subtle, #e0f0ff);
+  outline: 2px dashed var(--accent, #3b82f6);
+}
+
 @media (max-width: 760px) {
   .app-shell {
     width: min(100vw - 20px, 100%);
@@ -953,4 +1048,13 @@ code {
   .upload-form-actions {
     align-items: stretch;
   }
+
+  .reports-workspace {
+    flex-direction: column;
+  }
+
+  .folder-nav {
+    width: 100%;
+  }
+}
 }

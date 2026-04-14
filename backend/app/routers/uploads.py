@@ -18,6 +18,7 @@ async def create_upload(
     compile_mode: str | None = Form(default=None),
     title: str | None = Form(default=None),
     tags: str | None = Form(default=None),
+    folder_id: str | None = Form(default=None),
 ) -> UploadCreateResponse:
     try:
         payload = upload_service.create_upload(
@@ -27,6 +28,7 @@ async def create_upload(
             compile_mode=compile_mode,
             title=title,
             tags=tags,
+            folder_id=folder_id,
         )
     except UploadValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

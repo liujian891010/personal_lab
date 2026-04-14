@@ -475,6 +475,113 @@ function renderPageShell({ eyebrow, title, copy, toolbar = "", body }) {
   `;
 }
 
+function _bindFolderNavEvents(folders, currentFolderId, unfiled, filterParams) {
+  // new folder
+  document.querySelector("#new-folder-btn")?.addEventListener("click", async () => {
+    const name = window.prompt("文件夹名称：");
+    if (!name?.trim()) return;
+    try {
+      await apiPost("/api/report-folders", { folder_name: name.trim() });
+      showToast("文件夹已创建", "good");
+      renderRoute();
+    } catch (err) {
+      showToast(err.message, "bad");
+    }
+  });
+
+  // rename
+  document.querySelectorAll("[data-rename-folder]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const fid = btn.dataset.renameFolder;
+      const newName = window.prompt("新名称：", btn.dataset.folderName);
+      if (!newName?.trim()) return;
+      try {
+        await apiRequest(`/api/report-folders/${encodeURIComponent(fid)}`, {
+          method: "PATCH",
+          body: JSON.stringify({ folder_name: newName.trim() }),
+        });
+        showToast("已重命名", "good");
+        renderRoute();
+      } catch (err) {
+        showToast(err.message, "bad");
+      }
+    });
+  });
+
+  // delete
+  document.querySelectorAll("[data-delete-folder]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const fid = btn.dataset.deleteFolder;
+      if (!window.confirm(`确认删除文件夹"${btn.dataset.folderName}"？文件夹必须为空。`)) return;
+      try {
+        await apiRequest(`/api/report-folders/${encodeURIComponent(fid)}`, { method: "DELETE" });
+        showToast("文件夹已删除", "good");
+        location.hash = buildHash("/reports", filterParams);
+        renderRoute();
+      } catch (err) {
+        showToast(err.message, "bad");
+      }
+    });
+  });
+
+  // move report
+  document.querySelectorAll("[data-move-report]").forEach((btn) => {
+    btn.addEventListener("click", async (e) => {
+      e.preventDefault();
+      const reportId = btn.dataset.moveReport;
+      const options = ["(Unfiled)", ...folders.map((f) => f.folder_name)];
+      const choice = window.prompt(`移动"${btn.dataset.reportTitle}"到：\n${options.map((o, i) => `${i}: ${o}`).join("\n")}\n\n输入序号：`);
+      if (choice === null) return;
+      const idx = Number(choice);
+      if (Number.isNaN(idx) || idx < 0 || idx >= options.length) return;
+      const targetFolderId = idx === 0 ? null : folders[idx - 1].folder_id;
+      try {
+        await apiPost(`/api/reports/${encodeURIComponent(reportId)}/move-folder`, { folder_id: targetFolderId });
+        showToast("已移动", "good");
+        renderRoute();
+      } catch (err) {
+        showToast(err.message, "bad");
+      }
+    });
+  });
+
+  // drag-and-drop: report cards as drag sources
+  document.querySelectorAll("article.card[data-report-id]").forEach((card) => {
+    card.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData("text/plain", card.dataset.reportId);
+      e.dataTransfer.effectAllowed = "move";
+      card.classList.add("dragging");
+    });
+    card.addEventListener("dragend", () => card.classList.remove("dragging"));
+  });
+
+  // drag-and-drop: folder nav items as drop targets
+  document.querySelectorAll(".folder-nav-item[data-folder-id]").forEach((li) => {
+    li.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      li.classList.add("drop-target");
+    });
+    li.addEventListener("dragleave", () => li.classList.remove("drop-target"));
+    li.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      li.classList.remove("drop-target");
+      const reportId = e.dataTransfer.getData("text/plain");
+      if (!reportId) return;
+      const fid = li.dataset.folderId;
+      try {
+        await apiPost(`/api/reports/${encodeURIComponent(reportId)}/move-folder`, { folder_id: fid });
+        showToast("已归档到文件夹", "good");
+        renderRoute();
+      } catch (err) {
+        showToast(err.message, "bad");
+      }
+    });
+  });
+}
+
 function bindHashForm(formSelector, path) {
   const form = document.querySelector(formSelector);
   if (!form) {
@@ -519,14 +626,46 @@ async function renderReportsView(route) {
   const sourceDomain = route.params.get("source_domain") || "";
   const status = route.params.get("status") || "";
   const skillName = route.params.get("skill_name") || "";
+  const folderId = route.params.get("folder_id") || "";
+  const unfiled = route.params.get("unfiled") === "true";
 
-  const [listData, tagsData, domainsData] = await Promise.all([
+  const [listData, tagsData, domainsData, foldersData] = await Promise.all([
     q
       ? apiGet(`/api/search?${serializeParams({ q, tag, source_domain: sourceDomain, status, skill_name: skillName, limit: 24 })}`)
-      : apiGet(`/api/reports?${serializeParams({ page, page_size: 18, tag, source_domain: sourceDomain, status, skill_name: skillName })}`),
+      : apiGet(`/api/reports?${serializeParams({ page, page_size: 18, tag, source_domain: sourceDomain, status, skill_name: skillName, folder_id: folderId || undefined, unfiled: unfiled || undefined })}`),
     apiGet("/api/tags"),
     apiGet("/api/domains"),
+    apiGet("/api/report-folders"),
   ]);
+
+  const folders = foldersData.items || [];
+
+  const folderNav = `
+    <nav class="folder-nav panel">
+      <div class="folder-nav-header">
+        <span class="field-label">文件夹</span>
+        <button class="ghost-button" id="new-folder-btn" type="button">+ 新建</button>
+      </div>
+      <ul class="folder-nav-list">
+        <li class="${!folderId && !unfiled ? "active" : ""}">
+          <a href="${buildHash("/reports", { tag, source_domain: sourceDomain, status, skill_name: skillName })}">All Reports</a>
+        </li>
+        <li class="${unfiled ? "active" : ""}">
+          <a href="${buildHash("/reports", { unfiled: "true", tag, source_domain: sourceDomain, status, skill_name: skillName })}">Unfiled</a>
+        </li>
+        ${folders.map((f) => `
+          <li class="folder-nav-item ${folderId === f.folder_id ? "active" : ""}" data-folder-id="${escapeHtml(f.folder_id)}">
+            <a href="${buildHash("/reports", { folder_id: f.folder_id, tag, source_domain: sourceDomain, status, skill_name: skillName })}">${escapeHtml(f.folder_name)}</a>
+            <span class="folder-count subtle">${f.report_count}</span>
+            <span class="folder-actions">
+              <button class="icon-btn" data-rename-folder="${escapeHtml(f.folder_id)}" data-folder-name="${escapeHtml(f.folder_name)}" title="重命名">✎</button>
+              <button class="icon-btn" data-delete-folder="${escapeHtml(f.folder_id)}" data-folder-name="${escapeHtml(f.folder_name)}" title="删除">✕</button>
+            </span>
+          </li>
+        `).join("")}
+      </ul>
+    </nav>
+  `;
 
   const items = listData.items || [];
   const cards = items.length
@@ -534,12 +673,16 @@ async function renderReportsView(route) {
         .map((item) => {
           const itemTags = item.tags || [];
           const summary = q ? stripHtml(item.snippet || item.summary || "") : item.summary;
+          const folderBadge = item.folder_name_ref
+            ? `<span class="chip neutral" title="文件夹">${escapeHtml(item.folder_name_ref)}</span>`
+            : "";
           return `
-            <article class="card">
+            <article class="card" draggable="true" data-report-id="${escapeHtml(item.report_id)}">
               <div class="meta-row">
                 ${badge(item.status || "published", toneForStatus(item.status))}
                 ${badge(item.source_domain || "unknown")}
                 ${badge(item.skill_name || item.source_type || "report")}
+                ${folderBadge}
               </div>
               <h3><a href="${buildHash(`/reports/${encodeURIComponent(item.report_id)}`)}">${escapeHtml(item.title)}</a></h3>
               <p class="text-block">${escapeHtml(summary || "No summary.")}</p>
@@ -547,6 +690,9 @@ async function renderReportsView(route) {
               <div class="inline-list subtle">
                 <span>${escapeHtml(item.report_id)}</span>
                 <span>${escapeHtml(formatDateTime(item.generated_at))}</span>
+              </div>
+              <div class="button-row">
+                <button class="ghost-button" data-move-report="${escapeHtml(item.report_id)}" data-report-title="${escapeHtml(item.title)}">移动到文件夹</button>
               </div>
             </article>
           `;
@@ -606,19 +752,25 @@ async function renderReportsView(route) {
   `;
 
   const body = `
-    <section class="card-grid">${cards}</section>
-    ${q ? "" : renderPagination({ path: "/reports", page, pageSize: 18, total: listData.total || 0, params: { tag, source_domain: sourceDomain, status, skill_name: skillName } })}
+    <div class="reports-workspace">
+      ${folderNav}
+      <div class="reports-main">
+        <section class="card-grid">${cards}</section>
+        ${q ? "" : renderPagination({ path: "/reports", page, pageSize: 18, total: listData.total || 0, params: { tag, source_domain: sourceDomain, status, skill_name: skillName, folder_id: folderId || undefined, unfiled: unfiled || undefined } })}
+      </div>
+    </div>
   `;
 
   appNode.innerHTML = renderPageShell({
     eyebrow: "Reports",
     title: q ? "报告搜索" : "报告中心",
-    copy: q ? `当前按关键词“${q}”检索报告。` : "查看 Skill 产出的报告、过滤来源，并进入原文详情。",
+    copy: q ? `当前按关键词"${q}"检索报告。` : "查看 Skill 产出的报告、过滤来源，并进入原文详情。",
     toolbar,
     body,
   });
 
   bindHashForm("#report-filters", "/reports");
+  _bindFolderNavEvents(folders, folderId, unfiled, { tag, source_domain: sourceDomain, status, skill_name: skillName });
 }
 
 async function renderUploadsView(route) {
@@ -632,9 +784,11 @@ async function renderUploadsView(route) {
   const stage = route.params.get("stage") || "";
   const q = route.params.get("q") || "";
 
-  const data = await apiGet(
-    `/api/uploads?${serializeParams({ page, page_size: 18, status, stage, q })}`
-  );
+  const [data, foldersData] = await Promise.all([
+    apiGet(`/api/uploads?${serializeParams({ page, page_size: 18, status, stage, q })}`),
+    apiGet("/api/report-folders"),
+  ]);
+  const folders = foldersData.items || [];
 
   const cards = (data.items || []).length
     ? data.items
@@ -712,6 +866,13 @@ async function renderUploadsView(route) {
             <select name="auto_compile">
               <option value="false">false</option>
               <option value="true">true</option>
+            </select>
+          </label>
+          <label class="field">
+            <span class="field-label">目标文件夹</span>
+            <select name="folder_id">
+              <option value="">-- 不归档 (Unfiled) --</option>
+              ${folders.map((f) => `<option value="${escapeHtml(f.folder_id)}">${escapeHtml(f.folder_name)}</option>`).join("")}
             </select>
           </label>
           </div>
@@ -793,6 +954,7 @@ async function renderUploadsView(route) {
     const compileMode = String(form.querySelector('[name="compile_mode"]')?.value || "").trim();
     const autoProcess = String(form.querySelector('[name="auto_process"]')?.value || "true");
     const autoCompile = String(form.querySelector('[name="auto_compile"]')?.value || "false");
+    const folderIdVal = String(form.querySelector('[name="folder_id"]')?.value || "").trim();
     const submitButton = form.querySelector('button[type="submit"]');
     const previousButtonText = submitButton?.textContent || "Upload Files";
 
@@ -816,6 +978,9 @@ async function renderUploadsView(route) {
         }
         formData.append("auto_process", autoProcess);
         formData.append("auto_compile", autoCompile);
+        if (folderIdVal) {
+          formData.append("folder_id", folderIdVal);
+        }
 
         try {
           const result = await apiPostForm("/api/uploads", formData);

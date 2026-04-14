@@ -18,6 +18,8 @@ def list_reports(
     source_domain: str | None = None,
     skill_name: str | None = None,
     status: str | None = None,
+    folder_id: str | None = None,
+    unfiled: bool = False,
 ) -> ReportListResponse:
     data = report_service.list_reports(
         page=page,
@@ -26,6 +28,8 @@ def list_reports(
         source_domain=source_domain,
         skill_name=skill_name,
         status=status,
+        folder_id=folder_id,
+        unfiled=unfiled,
     )
     return ReportListResponse(**data)
 

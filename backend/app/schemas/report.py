@@ -15,6 +15,8 @@ class ReportSummary(BaseModel):
     status: str
     summary: str
     tags: list[str] = Field(default_factory=list)
+    folder_id_ref: str | None = None
+    folder_name_ref: str | None = None
 
 
 class ReportListResponse(BaseModel):
