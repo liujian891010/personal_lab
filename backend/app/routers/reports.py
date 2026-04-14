@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse
 
+from .auth import require_user
 from ..schemas.report import ReportDetail, ReportListResponse
 from ..services.report_service import report_service
 
 
-router = APIRouter(prefix="/api", tags=["reports"])
+router = APIRouter(prefix="/api", tags=["reports"], dependencies=[Depends(require_user)])
 
 
 @router.get("/reports", response_model=ReportListResponse)

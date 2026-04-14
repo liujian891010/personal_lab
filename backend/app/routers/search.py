@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 
+from .auth import require_user
 from ..schemas.search import CountListResponse, SearchResponse
 from ..services.search_service import search_service
 
 
-router = APIRouter(prefix="/api", tags=["search"])
+router = APIRouter(prefix="/api", tags=["search"], dependencies=[Depends(require_user)])
 
 
 @router.get("/search", response_model=SearchResponse)

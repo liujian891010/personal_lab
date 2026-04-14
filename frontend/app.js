@@ -1,13 +1,29 @@
 const appNode = document.querySelector("#app");
 const toastNode = document.querySelector("#toast");
 const healthPillNode = document.querySelector("#health-pill");
+const sessionSlotNode = document.querySelector("#session-slot");
+const topbarNode = document.querySelector(".topbar");
+const appShellNode = document.querySelector(".app-shell");
+const EXTERNAL_APPKEY_LOGIN_URL = "https://sg-al-cwork-web.mediportal.com.cn/user/login/appkey";
+const DEFAULT_APPKEY = "A2d5J8fCDNHT3Vbkv3dndsEzoQ3zMNsv";
+const EXTERNAL_APP_CODE = "personal_lab";
 
 const state = {
+  appkey: null,
   health: null,
+  currentUser: null,
   askResult: null,
   askWritebackResult: null,
   adminEvents: [],
 };
+
+class ApiError extends Error {
+  constructor(message, status) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 const statusToneMap = {
   success: "good",
@@ -123,9 +139,11 @@ function showToast(message, tone = "neutral") {
 
 async function apiRequest(path, options = {}) {
   const response = await fetch(path, {
+    credentials: "same-origin",
     ...options,
     headers: {
       Accept: "application/json",
+      ...(state.appkey && path.startsWith("/api/") ? { "X-Appkey": state.appkey } : {}),
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...(options.headers || {}),
     },
@@ -141,7 +159,11 @@ async function apiRequest(path, options = {}) {
     } catch (error) {
       void error;
     }
-    throw new Error(detail);
+    const apiError = new ApiError(detail, response.status);
+    if (response.status === 401 && path !== "/api/auth/me" && path !== "/api/auth/login") {
+      await handleUnauthorized(detail);
+    }
+    throw apiError;
   }
 
   const text = await response.text();
@@ -158,9 +180,11 @@ function apiPost(path, payload) {
 
 async function apiRequestText(path, options = {}) {
   const response = await fetch(path, {
+    credentials: "same-origin",
     ...options,
     headers: {
       Accept: "text/plain, application/json",
+      ...(state.appkey && path.startsWith("/api/") ? { "X-Appkey": state.appkey } : {}),
       ...(options.headers || {}),
     },
   });
@@ -175,7 +199,11 @@ async function apiRequestText(path, options = {}) {
     } catch (error) {
       void error;
     }
-    throw new Error(detail);
+    const apiError = new ApiError(detail, response.status);
+    if (response.status === 401) {
+      await handleUnauthorized(detail);
+    }
+    throw apiError;
   }
 
   return response.text();
@@ -183,10 +211,12 @@ async function apiRequestText(path, options = {}) {
 
 async function apiPostForm(path, formData) {
   const response = await fetch(path, {
+    credentials: "same-origin",
     method: "POST",
     body: formData,
     headers: {
       Accept: "application/json",
+      ...(state.appkey && path.startsWith("/api/") ? { "X-Appkey": state.appkey } : {}),
     },
   });
 
@@ -200,7 +230,11 @@ async function apiPostForm(path, formData) {
     } catch (error) {
       void error;
     }
-    throw new Error(detail);
+    const apiError = new ApiError(detail, response.status);
+    if (response.status === 401) {
+      await handleUnauthorized(detail);
+    }
+    throw apiError;
   }
 
   const text = await response.text();
@@ -443,6 +477,241 @@ function renderError(error) {
     </section>
   `;
   document.querySelector("#retry-button")?.addEventListener("click", () => renderRoute());
+}
+
+function isUnauthorizedError(error) {
+  return error instanceof ApiError && error.status === 401;
+}
+
+function renderSessionChrome() {
+  if (!sessionSlotNode) {
+    return;
+  }
+  const navNode = document.querySelector(".main-nav");
+  navNode?.classList.toggle("disabled", !state.currentUser);
+  if (!state.currentUser) {
+    sessionSlotNode.innerHTML = `
+      <div class="session-pill signed-out">
+        <span class="session-state-dot" aria-hidden="true"></span>
+        <div class="session-meta">
+          <strong>已退出</strong>
+          <span>输入 APPKEY 后重新进入工作区</span>
+        </div>
+      </div>
+    `;
+    return;
+  }
+  sessionSlotNode.innerHTML = `
+    <div class="session-pill">
+      <span class="session-state-dot active" aria-hidden="true"></span>
+      <div class="session-meta">
+        <strong>${escapeHtml(state.currentUser.user_name)}</strong>
+        <span>工作区：${escapeHtml(state.currentUser.workspace_name)}</span>
+      </div>
+      <button class="ghost-button" id="logout-button" type="button">退出</button>
+    </div>
+  `;
+  document.querySelector("#logout-button")?.addEventListener("click", async () => {
+    clearClientAuthState();
+    state.currentUser = null;
+    renderSessionChrome();
+    renderLoginView();
+  });
+}
+
+function setTopbarVisible(visible) {
+  if (!topbarNode) {
+    return;
+  }
+  topbarNode.hidden = !visible;
+}
+
+function setLayoutMode(mode) {
+  const isAuthMode = mode === "auth";
+  document.body.classList.toggle("auth-mode", isAuthMode);
+  appShellNode?.classList.toggle("auth-mode", isAuthMode);
+  if (topbarNode) {
+    topbarNode.hidden = isAuthMode;
+  }
+}
+
+function renderLoginView(message = "") {
+  setTopbarVisible(false);
+  setLayoutMode("auth");
+  setActiveNav("");
+  appNode.innerHTML = `
+    <section class="login-shell">
+      <form class="login-card" id="login-form">
+        <p class="eyebrow">Authentication</p>
+        <h2 class="page-title">APPKEY 登录</h2>
+        <p class="login-note">输入 APPKEY 后，系统会通过后端直接调用外部登录接口，建立当前用户和工作区会话。</p>
+        <label class="field">
+          <span class="field-label">APPKEY</span>
+          <input name="appkey" type="password" autocomplete="off" placeholder="请输入 APPKEY" />
+        </label>
+        ${message ? `<p class="subtle">${escapeHtml(message)}</p>` : ""}
+        <div class="button-row">
+          <button class="button" type="submit">登录</button>
+        </div>
+      </form>
+    </section>
+  `;
+  const appkeyInputNode = document.querySelector('#login-form input[name="appkey"]');
+  if (appkeyInputNode && !appkeyInputNode.value) {
+    appkeyInputNode.value = DEFAULT_APPKEY;
+  }
+  document.querySelector("#login-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const form = new FormData(event.currentTarget);
+    const appkey = String(form.get("appkey") || "").trim();
+    if (!appkey) {
+      showToast("请输入 APPKEY。", "bad");
+      return;
+    }
+    try {
+      const payload = await loginWithExternalAppkey(appkey);
+      state.appkey = appkey;
+      state.currentUser = payload;
+      persistClientAuthState();
+      try {
+        state.currentUser = await apiGet("/api/auth/me");
+      } catch (error) {
+        clearClientAuthState();
+        throw error;
+      }
+      persistClientAuthState();
+      renderSessionChrome();
+      await refreshHealth();
+      if (!location.hash) {
+        location.hash = buildHash("/reports");
+      }
+      showToast("登录成功。", "good");
+      await renderRoute();
+    } catch (error) {
+      if (!isUnauthorizedError(error)) {
+        renderLoginView(error.message || "登录失败。");
+      }
+    }
+  });
+}
+
+async function handleUnauthorized(message = "登录已失效，请重新登录。") {
+  clearClientAuthState();
+  state.appkey = null;
+  state.currentUser = null;
+  renderSessionChrome();
+  renderLoginView(message);
+}
+
+function persistClientAuthState() {
+  if (state.appkey) {
+    sessionStorage.setItem("appkey", state.appkey);
+  } else {
+    sessionStorage.removeItem("appkey");
+  }
+  if (state.currentUser) {
+    sessionStorage.setItem("currentUser", JSON.stringify(state.currentUser));
+  } else {
+    sessionStorage.removeItem("currentUser");
+  }
+}
+
+function clearClientAuthState() {
+  sessionStorage.removeItem("appkey");
+  sessionStorage.removeItem("currentUser");
+}
+
+function restoreClientAuthState() {
+  const storedAppkey = sessionStorage.getItem("appkey");
+  const storedUser = sessionStorage.getItem("currentUser");
+  state.appkey = storedAppkey || null;
+  if (!storedUser) {
+    state.currentUser = null;
+    return;
+  }
+  try {
+    state.currentUser = JSON.parse(storedUser);
+  } catch (error) {
+    void error;
+    clearClientAuthState();
+    state.appkey = null;
+    state.currentUser = null;
+  }
+}
+
+function pickFirstString(payload, keys) {
+  for (const key of keys) {
+    const value = payload?.[key];
+    if (value === undefined || value === null) {
+      continue;
+    }
+    const text = String(value).trim();
+    if (text) {
+      return text;
+    }
+  }
+  return null;
+}
+
+function normalizeExternalAuthPayload(payload) {
+  const candidate =
+    (payload && typeof payload.data === "object" && payload.data) ||
+    (payload && typeof payload.result === "object" && payload.result) ||
+    (payload && typeof payload.user === "object" && payload.user) ||
+    (payload && typeof payload.payload === "object" && payload.payload) ||
+    payload;
+  if (!candidate || typeof candidate !== "object") {
+    throw new Error("登录失败：外部接口返回格式异常。");
+  }
+  const userId = pickFirstString(candidate, ["user_id", "userId", "userid", "uid", "id"]);
+  if (!userId) {
+    throw new Error("登录失败：外部接口未返回 user_id。");
+  }
+  const userName =
+    pickFirstString(candidate, ["user_name", "userName", "username", "name", "nickname", "displayName", "realName"]) || userId;
+  const workspaceId =
+    pickFirstString(candidate, ["workspace_id", "workspaceId", "workspaceid", "tenant_id", "tenantId", "tenantid", "org_id", "orgId", "orgid", "space_id", "spaceId", "spaceid"]) ||
+    userId;
+  const workspaceName =
+    pickFirstString(candidate, ["workspace_name", "workspaceName", "workspacename", "tenant_name", "tenantName", "tenantname", "org_name", "orgName", "orgname", "space_name", "spaceName", "spacename"]) ||
+    userName;
+  const rawRoles = Array.isArray(candidate.roles) ? candidate.roles : [];
+  const roles = rawRoles.length ? rawRoles.map((item) => String(item).trim()).filter(Boolean) : ["user"];
+  const appkeyStatus = pickFirstString(candidate, ["appkey_status", "appkeyStatus", "status"]) || "active";
+  return {
+    user_id: userId,
+    user_name: userName,
+    workspace_id: workspaceId,
+    workspace_name: workspaceName,
+    roles,
+    appkey_status: appkeyStatus,
+  };
+}
+
+async function loginWithExternalAppkey(appkey) {
+  const search = new URLSearchParams({ appKey: appkey, appCode: EXTERNAL_APP_CODE });
+  let response;
+  try {
+    response = await fetch(`${EXTERNAL_APPKEY_LOGIN_URL}?${search.toString()}`, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+  } catch (error) {
+    throw new Error(`外部登录接口调用失败：${error.message || "network error"}`);
+  }
+  let payload = null;
+  try {
+    payload = await response.json();
+  } catch (error) {
+    throw new Error("外部登录接口返回了无效的 JSON。");
+  }
+  if (!response.ok) {
+    const detail =
+      (payload && (payload.message || payload.msg || payload.error || payload.detail)) ||
+      `${response.status} ${response.statusText}`;
+    throw new Error(`外部登录失败：${detail}`);
+  }
+  return normalizeExternalAuthPayload(payload);
 }
 
 function renderPagination({ path, page, pageSize, total, params }) {
@@ -1946,6 +2215,12 @@ async function renderNotFound() {
 }
 
 async function renderRoute() {
+  if (!state.currentUser) {
+    renderLoginView();
+    return;
+  }
+  setTopbarVisible(true);
+  setLayoutMode("app");
   const route = getRoute();
   const navSection = ["uploads", "reports", "wiki", "ask", "tasks", "conflicts", "admin"].includes(route.section)
     ? route.section
@@ -1981,6 +2256,9 @@ async function renderRoute() {
         break;
     }
   } catch (error) {
+    if (isUnauthorizedError(error)) {
+      return;
+    }
     renderError(error);
   }
 }
@@ -1994,6 +2272,23 @@ window.addEventListener("hashchange", () => {
 });
 
 window.addEventListener("DOMContentLoaded", async () => {
+  restoreClientAuthState();
+  renderSessionChrome();
   await refreshHealth();
-  await renderRoute();
+  if (!state.appkey) {
+    renderLoginView();
+    return;
+  }
+  try {
+    state.currentUser = await apiGet("/api/auth/me");
+    persistClientAuthState();
+    renderSessionChrome();
+    await renderRoute();
+  } catch (error) {
+    if (isUnauthorizedError(error)) {
+      renderLoginView();
+      return;
+    }
+    renderError(error);
+  }
 });

@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 
+from .auth import require_user
 from ..schemas.folder import (
     FolderCreateRequest,
     FolderListResponse,
@@ -16,7 +17,7 @@ from ..services.folder_service import (
     folder_service,
 )
 
-router = APIRouter(prefix="/api", tags=["folders"])
+router = APIRouter(prefix="/api", tags=["folders"], dependencies=[Depends(require_user)])
 
 
 @router.get("/report-folders", response_model=FolderListResponse)

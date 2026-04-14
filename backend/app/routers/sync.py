@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from .auth import require_user
 from ..schemas.sync import SyncRequest, SyncResponse
 from ..services.sync_service import sync_service
 
 
-router = APIRouter(prefix="/api", tags=["sync"])
+router = APIRouter(prefix="/api", tags=["sync"], dependencies=[Depends(require_user)])
 
 
 @router.post("/sync", response_model=SyncResponse)

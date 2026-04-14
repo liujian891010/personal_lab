@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from fastapi.responses import PlainTextResponse
 
+from .auth import require_user
 from ..schemas.upload import UploadCreateResponse, UploadDetail, UploadListResponse, UploadProcessRequest, UploadRetryRequest
 from ..services.upload_service import UploadNotFoundError, UploadValidationError, upload_service
 
 
-router = APIRouter(prefix="/api", tags=["uploads"])
+router = APIRouter(prefix="/api", tags=["uploads"], dependencies=[Depends(require_user)])
 
 
 @router.post("/uploads", response_model=UploadCreateResponse, status_code=status.HTTP_201_CREATED)

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from ..config import settings
+from ..config import get_workspace_knowledge_root
 from ..db import db_manager, row_to_dict
 from ..indexing.frontmatter import parse_frontmatter
 from ..indexing.scanner import scan_markdown_files
@@ -52,12 +52,13 @@ class WikiDocument:
 
 class WikiService:
     def ensure_knowledge_dirs(self) -> None:
+        knowledge_root = self._knowledge_root()
         for subdir in KNOWN_KNOWLEDGE_DIRS:
-            (settings.knowledge_root / subdir).mkdir(parents=True, exist_ok=True)
+            (knowledge_root / subdir).mkdir(parents=True, exist_ok=True)
 
     def refresh_index(self) -> None:
         self.ensure_knowledge_dirs()
-        files = scan_markdown_files(settings.knowledge_root)
+        files = scan_markdown_files(self._knowledge_root())
         documents: list[WikiDocument] = [self._parse_wiki_file(path) for path in files]
         self._validate_unique_constraints(documents)
 
@@ -215,7 +216,7 @@ class WikiService:
                 (item["page_id"],),
             ).fetchall()
         ]
-        item["content"] = read_text(settings.knowledge_root, item["file_path"])
+        item["content"] = read_text(self._knowledge_root(), item["file_path"])
         return item
 
     def _parse_wiki_file(self, path: Path) -> WikiDocument:
@@ -223,7 +224,7 @@ class WikiService:
         parsed = parse_frontmatter(raw_content)
         metadata = dict(parsed.metadata)
         body = parsed.body.strip()
-        relative_path = path.relative_to(settings.knowledge_root).as_posix()
+        relative_path = path.relative_to(self._knowledge_root()).as_posix()
 
         page_id = str(metadata.get("page_id") or self._derive_page_id(relative_path))
         page_type = str(metadata.get("page_type") or self._derive_page_type(path))
@@ -467,6 +468,14 @@ class WikiService:
 
     def _current_time(self) -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def _knowledge_root(self) -> Path:
+        from ..workspace import get_current_workspace_id
+
+        workspace_id = get_current_workspace_id()
+        if not workspace_id:
+            raise ValueError("workspace context is required")
+        return get_workspace_knowledge_root(workspace_id)
 
 
 wiki_service = WikiService()

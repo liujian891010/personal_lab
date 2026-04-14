@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from .auth import require_user
 from ..schemas.query import AskRequest, AskResponse, WritebackRequest, WritebackResponse
 from ..services.query_service import query_service
 
 
-router = APIRouter(prefix="/api/query", tags=["query"])
+router = APIRouter(prefix="/api/query", tags=["query"], dependencies=[Depends(require_user)])
 
 
 @router.post("/ask", response_model=AskResponse)

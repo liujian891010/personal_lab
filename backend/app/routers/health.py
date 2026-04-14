@@ -2,18 +2,20 @@ from __future__ import annotations
 
 import sqlite3
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from ..config import settings
 from ..db import db_manager, row_to_dict
+from ..routers.auth import bind_optional_user_context
 from ..schemas.health import DirectoryStatus, HealthResponse
+from ..workspace import UserContext
 
 
 router = APIRouter(prefix="/api", tags=["health"])
 
 
 @router.get("/health", response_model=HealthResponse)
-def get_health() -> HealthResponse:
+def get_health(_: UserContext | None = Depends(bind_optional_user_context)) -> HealthResponse:
     latest_sync = None
     database_ready = False
 
@@ -38,7 +40,7 @@ def get_health() -> HealthResponse:
         status="ok" if database_ready else "degraded",
         service=settings.api_title,
         version=settings.api_version,
-        database_path=str(settings.sqlite_path),
+        database_path=str(db_manager.current_db_path()),
         database_ready=database_ready,
         raw_root=DirectoryStatus(path=str(settings.raw_root), exists=settings.raw_root.exists()),
         raw_uploads_root=DirectoryStatus(

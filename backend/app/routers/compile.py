@@ -1,12 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from .auth import require_user
 from ..schemas.compile import CompileRequest, CompileResponse
 from ..services.compile_service import compile_service
 
 
-router = APIRouter(prefix="/api/wiki", tags=["compile"])
+router = APIRouter(prefix="/api/wiki", tags=["compile"], dependencies=[Depends(require_user)])
 
 
 @router.post("/compile", response_model=CompileResponse)

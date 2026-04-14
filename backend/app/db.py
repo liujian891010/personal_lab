@@ -5,7 +5,8 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Iterator
 
-from .config import settings
+from .config import ensure_workspace_dirs, get_workspace_sqlite_path, settings
+from .workspace import get_current_workspace_id
 
 
 SCHEMA_PATH = Path(__file__).resolve().parent / "sql" / "schema.sql"
@@ -13,22 +14,46 @@ SCHEMA_PATH = Path(__file__).resolve().parent / "sql" / "schema.sql"
 
 class DatabaseManager:
     def __init__(self, db_path: Path, schema_path: Path) -> None:
-        self.db_path = db_path
+        self.default_db_path = db_path
         self.schema_path = schema_path
+        self._initialized_paths: set[str] = set()
+
+    def _resolve_db_path(self) -> Path:
+        workspace_id = get_current_workspace_id()
+        if not workspace_id:
+            return self.default_db_path
+        ensure_workspace_dirs(workspace_id)
+        return get_workspace_sqlite_path(workspace_id)
+
+    def current_db_path(self) -> Path:
+        return self._resolve_db_path()
 
     def connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
+        db_path = self._resolve_db_path()
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.initialize(db_path=db_path)
+        connection = sqlite3.connect(db_path)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA foreign_keys = ON;")
         connection.execute("PRAGMA journal_mode = WAL;")
         return connection
 
-    def initialize(self) -> None:
+    def initialize(self, db_path: Path | None = None) -> None:
+        actual_db_path = db_path or self.default_db_path
+        cache_key = str(actual_db_path.resolve())
+        if cache_key in self._initialized_paths:
+            return
+        actual_db_path.parent.mkdir(parents=True, exist_ok=True)
         schema_sql = self.schema_path.read_text(encoding="utf-8")
-        with self.connect() as connection:
+        connection = sqlite3.connect(actual_db_path)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA foreign_keys = ON;")
+        connection.execute("PRAGMA journal_mode = WAL;")
+        with connection:
             connection.executescript(schema_sql)
             self._apply_post_schema_migrations(connection)
             connection.commit()
+        self._initialized_paths.add(cache_key)
 
     def _apply_post_schema_migrations(self, connection: sqlite3.Connection) -> None:
         self._ensure_column(

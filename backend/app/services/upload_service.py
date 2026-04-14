@@ -15,7 +15,7 @@ import fitz
 from pypdf import PdfReader
 from rapidocr_onnxruntime import RapidOCR
 
-from ..config import settings
+from ..config import get_workspace_reports_root
 from ..db import db_manager, row_to_dict
 from .file_service import resolve_raw_upload_path, resolve_upload_storage_path, resolve_upload_working_path
 from .compile_service import compile_service
@@ -474,7 +474,7 @@ class UploadService:
         if not file_path.startswith(prefix):
             raise UploadValidationError(f"unexpected report preview path: {file_path}")
         relative_path = file_path[len(prefix) :]
-        return (settings.reports_root / relative_path).read_text(encoding="utf-8")
+        return (get_workspace_reports_root(self._workspace_id()) / relative_path).read_text(encoding="utf-8")
 
     def retry_upload(
         self,
@@ -638,7 +638,7 @@ class UploadService:
 
     def _write_report_preview(self, upload_id: str, metadata: dict[str, str], extracted_text: str) -> str:
         report_relative_path = f"{self._now().strftime('%Y/%m')}/{metadata['report_id']}.md"
-        report_path = settings.reports_root / report_relative_path
+        report_path = get_workspace_reports_root(self._workspace_id()) / report_relative_path
         report_path.parent.mkdir(parents=True, exist_ok=True)
         content = self._render_report_markdown(metadata, extracted_text)
         report_path.write_text(content, encoding="utf-8")
@@ -848,6 +848,14 @@ class UploadService:
 
     def _now(self) -> datetime:
         return datetime.now().astimezone()
+
+    def _workspace_id(self) -> str:
+        from ..workspace import get_current_workspace_id
+
+        workspace_id = get_current_workspace_id()
+        if not workspace_id:
+            raise UploadValidationError("workspace context is required")
+        return workspace_id
 
 
 upload_service = UploadService()

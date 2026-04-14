@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import ensure_runtime_dirs, settings
 from .db import db_manager
+from .routers.auth import router as auth_router
 from .routers.health import router as health_router
 from .routers.compile import router as compile_router
 from .routers.query import router as query_router
@@ -31,6 +32,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+app.include_router(auth_router)
 app.include_router(health_router)
 app.include_router(sync_router)
 app.include_router(uploads_router)

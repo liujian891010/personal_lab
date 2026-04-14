@@ -2,7 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ..config import report_root_key, settings
+from ..config import (
+    get_workspace_raw_uploads_root,
+    get_workspace_reports_root,
+    get_workspace_upload_failed_root,
+    get_workspace_upload_inbox_root,
+    get_workspace_upload_processed_root,
+    get_workspace_upload_working_root,
+    get_workspace_uploads_root,
+    report_root_key,
+    settings,
+)
+from ..workspace import get_current_workspace_id
 
 
 class UnsafePathError(ValueError):
@@ -29,34 +40,41 @@ def read_text(root: Path, relative_path: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
+def _require_workspace_id() -> str:
+    workspace_id = get_current_workspace_id()
+    if not workspace_id:
+        raise UnsafePathError("workspace context is required")
+    return workspace_id
+
+
 def resolve_upload_storage_path(storage_path: str) -> Path:
     normalized = storage_path.replace("\\", "/").lstrip("/")
-    return resolve_safe_path(settings.uploads_root, normalized)
+    return resolve_safe_path(get_workspace_uploads_root(_require_workspace_id()), normalized)
 
 
 def resolve_upload_inbox_path(relative_path: str) -> Path:
     normalized = relative_path.replace("\\", "/").lstrip("/")
-    return resolve_safe_path(settings.upload_inbox_root, normalized)
+    return resolve_safe_path(get_workspace_upload_inbox_root(_require_workspace_id()), normalized)
 
 
 def resolve_upload_working_path(relative_path: str) -> Path:
     normalized = relative_path.replace("\\", "/").lstrip("/")
-    return resolve_safe_path(settings.upload_working_root, normalized)
+    return resolve_safe_path(get_workspace_upload_working_root(_require_workspace_id()), normalized)
 
 
 def resolve_upload_processed_path(relative_path: str) -> Path:
     normalized = relative_path.replace("\\", "/").lstrip("/")
-    return resolve_safe_path(settings.upload_processed_root, normalized)
+    return resolve_safe_path(get_workspace_upload_processed_root(_require_workspace_id()), normalized)
 
 
 def resolve_upload_failed_path(relative_path: str) -> Path:
     normalized = relative_path.replace("\\", "/").lstrip("/")
-    return resolve_safe_path(settings.upload_failed_root, normalized)
+    return resolve_safe_path(get_workspace_upload_failed_root(_require_workspace_id()), normalized)
 
 
 def resolve_raw_upload_path(relative_path: str) -> Path:
     normalized = relative_path.replace("\\", "/").lstrip("/")
-    return resolve_safe_path(settings.raw_uploads_root, normalized)
+    return resolve_safe_path(get_workspace_raw_uploads_root(_require_workspace_id()), normalized)
 
 
 def read_upload_text(storage_path: str) -> str:
@@ -66,7 +84,10 @@ def read_upload_text(storage_path: str) -> str:
 
 def resolve_report_storage_path(storage_path: str) -> Path:
     normalized = storage_path.replace("\\", "/")
+    workspace_id = get_current_workspace_id()
     if normalized.startswith("@"):
+        if workspace_id:
+            raise UnsafePathError("additional report roots are not supported in workspace mode")
         prefix, _, relative_path = normalized[1:].partition("/")
         if not prefix or not relative_path:
             raise UnsafePathError(f"invalid additional report storage path: {storage_path}")
@@ -74,6 +95,8 @@ def resolve_report_storage_path(storage_path: str) -> Path:
             if report_root_key(root) == prefix:
                 return resolve_safe_path(root, relative_path)
         raise UnsafePathError(f"unknown additional report root for path: {storage_path}")
+    if workspace_id:
+        return resolve_safe_path(get_workspace_reports_root(workspace_id), normalized)
     return resolve_safe_path(settings.reports_root, normalized)
 
 

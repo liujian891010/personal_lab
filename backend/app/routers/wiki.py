@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 
+from .auth import require_user
 from ..schemas.conflict import ConflictListResponse
 from ..schemas.lint import LintRequest, LintResponse
 from ..schemas.task import TaskListResponse
@@ -12,7 +13,7 @@ from ..services.task_service import task_service
 from ..services.wiki_service import wiki_service
 
 
-router = APIRouter(prefix="/api/wiki", tags=["wiki"])
+router = APIRouter(prefix="/api/wiki", tags=["wiki"], dependencies=[Depends(require_user)])
 
 
 @router.get("/pages", response_model=WikiPageListResponse)

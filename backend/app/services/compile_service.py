@@ -3,9 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-
-from ..config import settings
+from ..config import get_workspace_knowledge_root
 from ..db import db_manager
 from .llm_service import LLMUnavailableError, llm_service
 from .report_service import report_service
@@ -195,12 +193,13 @@ class CompileService:
             "question": "questions",
             "timeline": "timelines",
         }[proposal.page_type]
-        target_path = settings.knowledge_root / subdir / f"{proposal.slug}.md"
+        target_path = get_workspace_knowledge_root(self._workspace_id()) / subdir / f"{proposal.slug}.md"
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         content = self._render_page_markdown(proposal)
         target_path.write_text(content, encoding="utf-8")
 
     def _append_safe_evidence(self, existing_page: dict, proposal: PageProposal) -> None:
-        file_path = settings.knowledge_root / existing_page["file_path"]
+        file_path = get_workspace_knowledge_root(self._workspace_id()) / existing_page["file_path"]
         raw_text = file_path.read_text(encoding="utf-8")
 
         if proposal.source_report_ids[0] in raw_text:
@@ -369,6 +368,14 @@ class CompileService:
 
     def _now(self) -> str:
         return datetime.now(timezone.utc).isoformat()
+
+    def _workspace_id(self) -> str:
+        from ..workspace import get_current_workspace_id
+
+        workspace_id = get_current_workspace_id()
+        if not workspace_id:
+            raise ValueError("workspace context is required")
+        return workspace_id
 
 
 compile_service = CompileService()

@@ -6,9 +6,9 @@
     <title>Report Center + LLM Wiki</title>
     <link rel="stylesheet" href="./styles.css" />
   </head>
-  <body>
-    <div class="app-shell">
-      <header class="topbar">
+  <body class="auth-mode">
+    <div class="app-shell auth-mode">
+      <header class="topbar" hidden>
         <div class="brand-block">
           <a class="brand-link" href="#/reports">Report Center</a>
           <p class="brand-copy">Reports, Wiki, Query, Governance</p>
@@ -22,7 +22,10 @@
           <a data-section="conflicts" href="#/conflicts">Conflicts</a>
           <a data-section="admin" href="#/admin">Admin</a>
         </nav>
-        <div class="health-pill" id="health-pill">API Pending</div>
+        <div class="topbar-status">
+          <div class="session-slot" id="session-slot"></div>
+          <div class="health-pill" id="health-pill">API Pending</div>
+        </div>
       </header>
 
       <main id="app" class="view-shell"></main>

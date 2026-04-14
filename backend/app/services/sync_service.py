@@ -3,9 +3,9 @@ from __future__ import annotations
 import sqlite3
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 
-from ..config import settings
-from ..config import encode_report_storage_path
+from ..config import encode_report_storage_path, get_workspace_reports_root
 from ..db import db_manager
 from ..indexing.scanner import scan_markdown_files
 from .metadata_service import ReportDocument, normalize_tag, parse_report_file
@@ -42,8 +42,7 @@ class SyncService:
             result = SyncResult(job_id=job_id, mode=mode)
 
             try:
-                # Scan both primary reports_root and additional_report_roots
-                all_roots = [settings.reports_root] + settings.additional_report_roots
+                all_roots = [get_workspace_reports_root(self._workspace_id())]
                 files = scan_markdown_files(all_roots, skip_top_level_dirs={"failed"})
                 result.scanned_count = len(files)
 
@@ -58,19 +57,19 @@ class SyncService:
                 documents: list[ReportDocument] = []
                 for file_path in files:
                     try:
-                        doc_root = root_for_file.get(file_path, settings.reports_root)
+                        doc_root = root_for_file.get(file_path, all_roots[0])
                         document = parse_report_file(file_path, doc_root)
                         storage_path = encode_report_storage_path(
                             root=doc_root,
                             relative_path=document.file_path,
-                            primary_root=settings.reports_root,
+                            primary_root=all_roots[0],
                         )
                         document.file_path = storage_path
                         documents.append(document)
                     except Exception as exc:  # noqa: BLE001
                         result.failed_count += 1
                         # Use the resolved root for relative path calculation
-                        doc_root = root_for_file.get(file_path, settings.reports_root)
+                        doc_root = root_for_file.get(file_path, all_roots[0])
                         result.warnings.append(
                             {
                                 "path": file_path.relative_to(doc_root).as_posix(),
@@ -314,6 +313,14 @@ class SyncService:
         connection.execute("DELETE FROM report_tags WHERE report_id_ref = ?", (report_id,))
         connection.execute("DELETE FROM search_index WHERE report_id = ?", (report_id,))
         connection.execute("DELETE FROM reports WHERE report_id = ?", (report_id,))
+
+    def _workspace_id(self) -> str:
+        from ..workspace import get_current_workspace_id
+
+        workspace_id = get_current_workspace_id()
+        if not workspace_id:
+            raise ValueError("workspace context is required")
+        return workspace_id
 
 
 sync_service = SyncService()

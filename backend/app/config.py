@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 from hashlib import sha1
 from dataclasses import dataclass
 from pathlib import Path
@@ -76,6 +77,11 @@ class Settings:
     logs_root: Path
     sqlite_path: Path
     llm_model: str
+    session_secret: str
+    appkey_login_url: str
+    appkey_query_param: str
+    appkey_app_code: str
+    auth_http_timeout_sec: float
     api_title: str = "Report Center API"
     api_version: str = "0.1.0"
 
@@ -100,6 +106,14 @@ def get_settings() -> Settings:
         logs_root=_resolve_path("LOGS_ROOT", "logs"),
         sqlite_path=_resolve_path("SQLITE_PATH", str(data_root / "reports.db")),
         llm_model=os.getenv("LLM_MODEL", "claude-sonnet-4-6"),
+        session_secret=os.getenv("SESSION_SECRET", "report-center-dev-secret"),
+        appkey_login_url=os.getenv(
+            "APPKEY_LOGIN_URL",
+            "https://sg-al-cwork-web.mediportal.com.cn/user/login/appkey",
+        ),
+        appkey_query_param=os.getenv("APPKEY_QUERY_PARAM", "appKey"),
+        appkey_app_code=os.getenv("APPKEY_APP_CODE", "personal_lab"),
+        auth_http_timeout_sec=float(os.getenv("AUTH_HTTP_TIMEOUT_SEC", "10")),
     )
 
 
@@ -124,3 +138,79 @@ def ensure_runtime_dirs(current_settings: Settings) -> None:
 
     for subdir in ("entities", "concepts", "topics", "questions", "timelines", "conflicts", "digests"):
         (current_settings.knowledge_root / subdir).mkdir(parents=True, exist_ok=True)
+
+
+def sanitize_workspace_id(workspace_id: str) -> str:
+    normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", workspace_id.strip()).strip("._-")
+    if not normalized:
+        raise ValueError("workspace_id must not be empty")
+    return normalized[:80]
+
+
+def get_workspace_root(workspace_id: str) -> Path:
+    return settings.data_root / "workspaces" / sanitize_workspace_id(workspace_id)
+
+
+def get_workspace_reports_root(workspace_id: str) -> Path:
+    return get_workspace_root(workspace_id) / "reports"
+
+
+def get_workspace_knowledge_root(workspace_id: str) -> Path:
+    return get_workspace_root(workspace_id) / "knowledge"
+
+
+def get_workspace_uploads_root(workspace_id: str) -> Path:
+    return get_workspace_root(workspace_id) / "uploads"
+
+
+def get_workspace_upload_inbox_root(workspace_id: str) -> Path:
+    return get_workspace_uploads_root(workspace_id) / "inbox"
+
+
+def get_workspace_upload_working_root(workspace_id: str) -> Path:
+    return get_workspace_uploads_root(workspace_id) / "working"
+
+
+def get_workspace_upload_processed_root(workspace_id: str) -> Path:
+    return get_workspace_uploads_root(workspace_id) / "processed"
+
+
+def get_workspace_upload_failed_root(workspace_id: str) -> Path:
+    return get_workspace_uploads_root(workspace_id) / "failed"
+
+
+def get_workspace_raw_root(workspace_id: str) -> Path:
+    return get_workspace_root(workspace_id) / "raw"
+
+
+def get_workspace_raw_uploads_root(workspace_id: str) -> Path:
+    return get_workspace_raw_root(workspace_id) / "uploads"
+
+
+def get_workspace_logs_root(workspace_id: str) -> Path:
+    return get_workspace_root(workspace_id) / "logs"
+
+
+def get_workspace_sqlite_path(workspace_id: str) -> Path:
+    return get_workspace_root(workspace_id) / "data" / "reports.db"
+
+
+def ensure_workspace_dirs(workspace_id: str) -> None:
+    knowledge_root = get_workspace_knowledge_root(workspace_id)
+    for directory in (
+        get_workspace_reports_root(workspace_id),
+        knowledge_root,
+        get_workspace_uploads_root(workspace_id),
+        get_workspace_upload_inbox_root(workspace_id),
+        get_workspace_upload_working_root(workspace_id),
+        get_workspace_upload_processed_root(workspace_id),
+        get_workspace_upload_failed_root(workspace_id),
+        get_workspace_raw_root(workspace_id),
+        get_workspace_raw_uploads_root(workspace_id),
+        get_workspace_logs_root(workspace_id),
+        get_workspace_sqlite_path(workspace_id).parent,
+    ):
+        directory.mkdir(parents=True, exist_ok=True)
+
+    for subdir in ("entities", "concepts", "topics", "questions", "timelines", "conflicts", "digests"):
+        (knowledge_root / subdir).mkdir(parents=True, exist_ok=True)
