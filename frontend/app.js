@@ -678,11 +678,16 @@ async function renderUploadsView(route) {
     copy: "接收本地文件，跟踪处理状态，并把结果推进到标准报告链路。",
     toolbar: `
       <section class="panel" style="margin-bottom: 18px;">
-        <form id="upload-form" class="form-grid two">
-          <label class="field" style="grid-column: 1 / -1;">
-            <span class="field-label">File</span>
-            <input name="file" type="file" required />
+        <form id="upload-form" class="upload-form-shell">
+          <label class="upload-picker" for="upload-file-input">
+            <span class="upload-picker-eyebrow">File Intake</span>
+            <strong class="upload-picker-title">选择一个文件开始上传</strong>
+            <span class="upload-picker-copy">支持 txt、md、html、pdf、docx。上传后会进入抽取、报告生成和入库链路。</span>
+            <span class="upload-picker-button">Select Files</span>
+            <span class="upload-picked-name" id="upload-picked-name">No files selected</span>
+            <input id="upload-file-input" name="file" type="file" multiple required />
           </label>
+          <div class="upload-form-grid">
           <label class="field">
             <span class="field-label">Title</span>
             <input name="title" placeholder="可选，默认用文件名" />
@@ -709,8 +714,12 @@ async function renderUploadsView(route) {
               <option value="true">true</option>
             </select>
           </label>
-          <div class="button-row">
-            <button class="button" type="submit">Upload File</button>
+          </div>
+          <div class="upload-form-actions">
+            <div class="upload-form-hint">建议默认使用 \`Auto Process = true\`，需要更保守时再关闭自动处理。</div>
+            <div class="button-row">
+              <button class="button" type="submit">Upload File</button>
+            </div>
           </div>
         </form>
       </section>
@@ -751,22 +760,99 @@ async function renderUploadsView(route) {
 
   bindHashForm("#upload-filters", "/uploads");
 
+  const uploadInput = document.querySelector("#upload-file-input");
+  const uploadPickedName = document.querySelector("#upload-picked-name");
+  uploadInput?.addEventListener("change", () => {
+    const files = Array.from(uploadInput.files || []);
+    if (!uploadPickedName) {
+      return;
+    }
+    if (!files.length) {
+      uploadPickedName.textContent = "No files selected";
+      uploadPickedName.classList.remove("has-file");
+      return;
+    }
+    const label =
+      files.length === 1
+        ? `${files[0].name} | ${files[0].size} bytes`
+        : `${files.length} files selected | ${files.slice(0, 3).map((file) => file.name).join(", ")}${files.length > 3 ? ", ..." : ""}`;
+    uploadPickedName.textContent = label;
+    uploadPickedName.classList.add("has-file");
+  });
+
   document.querySelector("#upload-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = event.currentTarget;
-    const formData = new FormData(form);
-    const file = formData.get("file");
-    if (!(file instanceof File) || !file.name) {
+    const files = Array.from(uploadInput?.files || []);
+    if (!files.length) {
       showToast("请选择要上传的文件。", "bad");
       return;
     }
 
+    const title = String(form.querySelector('[name="title"]')?.value || "").trim();
+    const compileMode = String(form.querySelector('[name="compile_mode"]')?.value || "").trim();
+    const autoProcess = String(form.querySelector('[name="auto_process"]')?.value || "true");
+    const autoCompile = String(form.querySelector('[name="auto_compile"]')?.value || "false");
+    const submitButton = form.querySelector('button[type="submit"]');
+    const previousButtonText = submitButton?.textContent || "Upload Files";
+
     try {
-      const result = await apiPostForm("/api/uploads", formData);
-      showToast("上传任务已创建。", "good");
-      location.hash = buildHash(`/uploads/${encodeURIComponent(result.upload_id)}`);
+      if (submitButton) {
+        submitButton.disabled = true;
+        submitButton.textContent = files.length > 1 ? `Uploading ${files.length} files...` : "Uploading...";
+      }
+
+      const successes = [];
+      const failures = [];
+
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append("file", file);
+        if (title) {
+          formData.append("title", files.length > 1 ? `${title} - ${file.name}` : title);
+        }
+        if (compileMode) {
+          formData.append("compile_mode", compileMode);
+        }
+        formData.append("auto_process", autoProcess);
+        formData.append("auto_compile", autoCompile);
+
+        try {
+          const result = await apiPostForm("/api/uploads", formData);
+          successes.push(result);
+        } catch (error) {
+          failures.push(`${file.name}: ${error.message || "upload failed"}`);
+        }
+      }
+
+      if (!successes.length) {
+        throw new Error(failures[0] || "上传失败。");
+      }
+
+      form.reset();
+      if (uploadPickedName) {
+        uploadPickedName.textContent = "No files selected";
+        uploadPickedName.classList.remove("has-file");
+      }
+
+      if (failures.length) {
+        showToast(`Created ${successes.length} upload job(s), ${failures.length} failed.`, "warn");
+      } else {
+        showToast(
+          successes.length === 1 ? "Upload job created." : `Created ${successes.length} upload jobs.`,
+          "good"
+        );
+      }
+
+      const latestUpload = successes[successes.length - 1];
+      location.hash = buildHash(`/uploads/${encodeURIComponent(latestUpload.upload_id)}`);
     } catch (error) {
-      showToast(error.message || "上传失败。", "bad");
+      showToast(error.message || "Upload failed.", "bad");
+    } finally {
+      if (submitButton) {
+        submitButton.disabled = false;
+        submitButton.textContent = previousButtonText;
+      }
     }
   });
 }
