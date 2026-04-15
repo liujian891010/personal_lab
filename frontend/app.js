@@ -528,10 +528,13 @@ function setTopbarVisible(visible) {
 
 function setLayoutMode(mode) {
   const isAuthMode = mode === "auth";
+  const isReaderMode = mode === "reader";
   document.body.classList.toggle("auth-mode", isAuthMode);
+  document.body.classList.toggle("reader-mode", isReaderMode);
   appShellNode?.classList.toggle("auth-mode", isAuthMode);
+  appShellNode?.classList.toggle("reader-mode", isReaderMode);
   if (topbarNode) {
-    topbarNode.hidden = isAuthMode;
+    topbarNode.hidden = isAuthMode || isReaderMode;
   }
 }
 
@@ -1469,6 +1472,7 @@ async function renderReportDetail(reportId) {
       <div class="button-row" style="margin-bottom: 16px;">
         ${linkButton(buildHash("/reports"), "返回报告列表")}
         <a class="soft-button" href="${escapeHtml(data.source_url || data.source_ref)}" target="_blank" rel="noreferrer">打开来源</a>
+        <a class="ghost-button" href="${buildHash(`/report-only/${encodeURIComponent(data.report_id)}`)}">仅详情页</a>
       </div>
       <section class="detail-grid">
         <article class="detail-shell">
@@ -1549,6 +1553,62 @@ async function renderReportDetail(reportId) {
       showToast(error.message || "Move failed.", "bad");
     }
   });
+}
+
+async function renderReportOnlyDetail(reportId) {
+  const data = await apiGet(`/api/reports/${encodeURIComponent(reportId)}`);
+  const content = renderMarkdownLite(stripFrontmatter(data.content));
+
+  appNode.innerHTML = `
+    <section class="report-reader-shell">
+      <header class="detail-shell report-reader-header">
+        <div class="report-reader-heading">
+          <p class="eyebrow">Report Detail</p>
+          <h1 class="page-title">${escapeHtml(data.title)}</h1>
+          <p class="page-copy">${escapeHtml(data.summary)}</p>
+        </div>
+        <div class="report-reader-actions">
+          <a class="soft-button" href="${escapeHtml(data.source_url || data.source_ref)}" target="_blank" rel="noreferrer">打开来源</a>
+          <a class="ghost-button" href="${buildHash(`/reports/${encodeURIComponent(data.report_id)}`)}">完整后台视图</a>
+        </div>
+        <div class="meta-row">
+          ${badge(data.status, toneForStatus(data.status))}
+          ${badge(data.source_domain)}
+          ${badge(data.skill_name)}
+        </div>
+        <div class="chip-row">${(data.tags || []).map((value) => chip(value)).join("")}</div>
+        <div class="report-reader-meta">
+          <div class="meta-block meta-block-compact report-info-card">
+            <div class="inline-kv inline-kv-compact">
+              <strong>Report ID</strong>
+              <code>${escapeHtml(data.report_id)}</code>
+            </div>
+          </div>
+          <div class="meta-block meta-block-compact report-info-card">
+            <div class="inline-kv inline-kv-compact">
+              <strong>Generated At</strong>
+              <span>${escapeHtml(formatDateTime(data.generated_at))}</span>
+            </div>
+          </div>
+          <div class="meta-block meta-block-compact report-info-card">
+            <div class="inline-kv inline-kv-compact">
+              <strong>Updated At</strong>
+              <span>${escapeHtml(formatDateTime(data.updated_at))}</span>
+            </div>
+          </div>
+          <div class="meta-block meta-block-compact report-info-card report-info-card-wide">
+            <div class="inline-kv inline-kv-compact">
+              <strong>Source Ref</strong>
+              <code>${escapeHtml(data.source_ref)}</code>
+            </div>
+          </div>
+        </div>
+      </header>
+      <article class="detail-shell report-reader-content">
+        <div class="markdown-body">${content}</div>
+      </article>
+    </section>
+  `;
 }
 
 async function renderWikiView(route) {
@@ -2219,17 +2279,21 @@ async function renderRoute() {
     renderLoginView();
     return;
   }
-  setTopbarVisible(true);
-  setLayoutMode("app");
   const route = getRoute();
+  const isReportOnlyRoute = route.section === "report-only";
+  setTopbarVisible(!isReportOnlyRoute);
+  setLayoutMode(isReportOnlyRoute ? "reader" : "app");
   const navSection = ["uploads", "reports", "wiki", "ask", "tasks", "conflicts", "admin"].includes(route.section)
     ? route.section
     : "reports";
-  setActiveNav(navSection);
+  setActiveNav(isReportOnlyRoute ? "" : navSection);
   renderLoading();
 
   try {
     switch (route.section) {
+      case "report-only":
+        await renderReportOnlyDetail(route.detail);
+        break;
       case "uploads":
         await renderUploadsView(route);
         break;
