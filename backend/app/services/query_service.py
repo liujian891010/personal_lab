@@ -121,6 +121,7 @@ class QueryService:
                 FROM search_index
                 JOIN reports r ON r.report_id = search_index.report_id
                 WHERE search_index MATCH ?
+                  AND r.deleted_at IS NULL
                 ORDER BY score
                 LIMIT 5
                 """,

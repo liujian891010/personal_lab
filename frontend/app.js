@@ -1543,6 +1543,10 @@ async function renderReportDetail(reportId) {
     .querySelector('.button-row[style="margin-bottom: 16px;"]')
     ?.insertAdjacentHTML("beforeend", '<button class="ghost-button" id="move-report-detail" type="button">移动到文件夹</button>');
 
+  document
+    .querySelector('.button-row[style="margin-bottom: 16px;"]')
+    ?.insertAdjacentHTML("beforeend", '<button class="ghost-button" id="delete-report-detail" type="button">Delete Report</button>');
+
   document.querySelector("#move-report-detail")?.addEventListener("click", async () => {
     try {
       const targetFolderId = promptForFolderSelection(folders, data.folder_id_ref || null);
@@ -1551,6 +1555,19 @@ async function renderReportDetail(reportId) {
       await renderReportDetail(reportId);
     } catch (error) {
       showToast(error.message || "Move failed.", "bad");
+    }
+  });
+  document.querySelector("#delete-report-detail")?.addEventListener("click", async () => {
+    const confirmed = window.confirm(
+      `Confirm delete "${data.title}"? The report will disappear immediately and files will be purged after 7 days.`
+    );
+    if (!confirmed) return;
+    try {
+      await apiRequest(`/api/reports/${encodeURIComponent(reportId)}`, { method: "DELETE" });
+      showToast("Report deleted.", "good");
+      location.hash = buildHash("/reports");
+    } catch (error) {
+      showToast(error.message || "Delete failed.", "bad");
     }
   });
 }

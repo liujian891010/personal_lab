@@ -88,6 +88,14 @@ class SyncService:
                             }
                         )
 
+                deleted_tombstones = self._load_deleted_tombstones(connection)
+                documents = [
+                    document
+                    for document in documents
+                    if document.report_id not in deleted_tombstones["report_ids"]
+                    and document.file_path not in deleted_tombstones["file_paths"]
+                ]
+
                 if mode == "full":
                     self._clear_report_indexes(connection)
 
@@ -166,10 +174,24 @@ class SyncService:
         )
 
     def _clear_report_indexes(self, connection: sqlite3.Connection) -> None:
-        connection.execute("DELETE FROM report_links")
-        connection.execute("DELETE FROM report_tags")
-        connection.execute("DELETE FROM reports")
         connection.execute("DELETE FROM search_index")
+        connection.execute(
+            """
+            DELETE FROM report_links
+            WHERE report_id_ref IN (
+                SELECT report_id FROM reports WHERE deleted_at IS NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            DELETE FROM report_tags
+            WHERE report_id_ref IN (
+                SELECT report_id FROM reports WHERE deleted_at IS NULL
+            )
+            """
+        )
+        connection.execute("DELETE FROM reports WHERE deleted_at IS NULL")
 
     def _load_existing_reports(self, connection: sqlite3.Connection) -> dict[str, sqlite3.Row]:
         rows = connection.execute(
@@ -179,16 +201,37 @@ class SyncService:
                    summary, content_hash, body_size, storage_provider, storage_bucket,
                    object_key, storage_status
             FROM reports
+            WHERE deleted_at IS NULL
             """
         ).fetchall()
         return {row["file_path"]: row for row in rows}
 
     def _load_existing_tags(self, connection: sqlite3.Connection) -> dict[str, set[str]]:
         tags_map: dict[str, set[str]] = {}
-        rows = connection.execute("SELECT report_id_ref, normalized_tag FROM report_tags").fetchall()
+        rows = connection.execute(
+            """
+            SELECT rt.report_id_ref, rt.normalized_tag
+            FROM report_tags rt
+            JOIN reports r ON r.report_id = rt.report_id_ref
+            WHERE r.deleted_at IS NULL
+            """
+        ).fetchall()
         for row in rows:
             tags_map.setdefault(row["report_id_ref"], set()).add(row["normalized_tag"])
         return tags_map
+
+    def _load_deleted_tombstones(self, connection: sqlite3.Connection) -> dict[str, set[str]]:
+        rows = connection.execute(
+            """
+            SELECT report_id, file_path
+            FROM reports
+            WHERE deleted_at IS NOT NULL
+            """
+        ).fetchall()
+        return {
+            "report_ids": {str(row["report_id"]) for row in rows},
+            "file_paths": {str(row["file_path"]) for row in rows},
+        }
 
     def _document_changed(
         self,

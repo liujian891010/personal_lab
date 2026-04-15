@@ -22,7 +22,7 @@ class SearchService:
         if not fts_query:
             return {"items": [], "total": 0, "took_ms": 0}
         joins: list[str] = []
-        where_clauses = ["search_index MATCH ?"]
+        where_clauses = ["search_index MATCH ?", "r.deleted_at IS NULL"]
         params: list[Any] = [fts_query]
 
         if tag:
@@ -80,10 +80,12 @@ class SearchService:
         with db_manager.session() as connection:
             rows = connection.execute(
                 """
-                SELECT tag, COUNT(*) AS count
-                FROM report_tags
-                GROUP BY normalized_tag, tag
-                ORDER BY count DESC, tag ASC
+                SELECT rt.tag, COUNT(*) AS count
+                FROM report_tags rt
+                JOIN reports r ON r.report_id = rt.report_id_ref
+                WHERE r.deleted_at IS NULL
+                GROUP BY rt.normalized_tag, rt.tag
+                ORDER BY count DESC, rt.tag ASC
                 """
             ).fetchall()
             return {"items": [row_to_dict(row) for row in rows]}
@@ -94,6 +96,7 @@ class SearchService:
                 """
                 SELECT source_domain, COUNT(*) AS count
                 FROM reports
+                WHERE deleted_at IS NULL
                 GROUP BY source_domain
                 ORDER BY count DESC, source_domain ASC
                 """

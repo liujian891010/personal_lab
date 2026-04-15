@@ -70,9 +70,46 @@ class DatabaseManager:
         )
         self._ensure_column(
             connection,
+            table_name="reports",
+            column_name="deleted_at",
+            column_sql="TEXT",
+        )
+        self._ensure_column(
+            connection,
+            table_name="reports",
+            column_name="deleted_by",
+            column_sql="TEXT",
+        )
+        self._ensure_column(
+            connection,
+            table_name="reports",
+            column_name="purge_after",
+            column_sql="TEXT",
+        )
+        self._ensure_column(
+            connection,
+            table_name="reports",
+            column_name="storage_cleanup_status",
+            column_sql="TEXT NOT NULL DEFAULT 'pending'",
+        )
+        self._ensure_column(
+            connection,
             table_name="upload_jobs",
             column_name="folder_id_ref",
             column_sql="TEXT REFERENCES report_folders(folder_id) ON DELETE SET NULL",
+        )
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS report_delete_audit_logs (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                report_id          TEXT NOT NULL,
+                action             TEXT NOT NULL,
+                actor_user_id      TEXT,
+                actor_workspace_id TEXT,
+                detail             TEXT,
+                created_at         TEXT NOT NULL
+            )
+            """
         )
         for table_name in ("reports", "wiki_pages", "upload_jobs", "upload_artifacts"):
             self._ensure_column(connection, table_name=table_name, column_name="storage_provider", column_sql="TEXT")
@@ -90,6 +127,17 @@ class DatabaseManager:
                 connection.execute(
                     f"CREATE INDEX IF NOT EXISTS idx_{table}_folder_id_ref ON {table}(folder_id_ref)"
                 )
+            except Exception:
+                pass
+        for index_sql in (
+            "CREATE INDEX IF NOT EXISTS idx_reports_deleted_at ON reports(deleted_at)",
+            "CREATE INDEX IF NOT EXISTS idx_reports_purge_after ON reports(purge_after)",
+            "CREATE INDEX IF NOT EXISTS idx_reports_storage_cleanup_status ON reports(storage_cleanup_status)",
+            "CREATE INDEX IF NOT EXISTS idx_report_delete_audit_logs_report_id "
+            "ON report_delete_audit_logs(report_id, created_at DESC)",
+        ):
+            try:
+                connection.execute(index_sql)
             except Exception:
                 pass
         for table in ("reports", "wiki_pages", "upload_jobs", "upload_artifacts"):

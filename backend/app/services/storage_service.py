@@ -78,6 +78,13 @@ class StorageService:
     def read_text(self, pointer: StoragePointer, *, encoding: str = "utf-8") -> str:
         return self.read_bytes(pointer).decode(encoding)
 
+    def delete(self, pointer: StoragePointer) -> None:
+        if pointer.storage_provider != "local":
+            raise StorageError(f"unsupported storage provider: {pointer.storage_provider}")
+        path = self._resolve_local_path(pointer.storage_bucket, pointer.object_key)
+        path.unlink(missing_ok=True)
+        self._prune_empty_parents(path.parent, stop_at=(self.root / pointer.storage_bucket).resolve())
+
     def _workspace_object_key(self, *, workspace_id: str, namespace: str, relative_path: str) -> str:
         normalized_workspace = sanitize_workspace_id(workspace_id)
         normalized_namespace = namespace.replace("\\", "/").strip("/")
@@ -100,6 +107,15 @@ class StorageService:
         except ValueError as exc:
             raise StorageError(f"object key escapes bucket root: {object_key}") from exc
         return candidate
+
+    def _prune_empty_parents(self, path: Path, *, stop_at: Path) -> None:
+        current = path.resolve()
+        while current != stop_at:
+            try:
+                current.rmdir()
+            except OSError:
+                break
+            current = current.parent
 
 
 storage_service = StorageService()

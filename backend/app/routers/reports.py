@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from fastapi.responses import PlainTextResponse
 
 from .auth import require_user
 from ..schemas.report import ReportDetail, ReportListResponse
-from ..services.report_service import report_service
+from ..services.report_service import ReportAlreadyDeletedError, ReportNotFoundError, report_service
 
 
 router = APIRouter(prefix="/api", tags=["reports"], dependencies=[Depends(require_user)])
@@ -49,3 +49,19 @@ def get_report_raw(report_id: str) -> PlainTextResponse:
     if content is None:
         raise HTTPException(status_code=404, detail="report not found")
     return PlainTextResponse(content)
+
+
+@router.delete("/reports/{report_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_report(report_id: str) -> Response:
+    try:
+        report_service.delete_report(report_id)
+    except ReportNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="report not found") from exc
+    except ReportAlreadyDeletedError as exc:
+        raise HTTPException(status_code=409, detail="report already deleted") from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/reports/purge-expired")
+def purge_expired_reports(limit: int = Query(default=100, ge=1, le=500)) -> dict:
+    return report_service.purge_expired_reports(limit=limit)
