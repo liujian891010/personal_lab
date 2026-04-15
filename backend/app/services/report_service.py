@@ -4,6 +4,7 @@ from typing import Any
 
 from ..db import db_manager, row_to_dict
 from .file_service import read_report_text
+from .storage_service import storage_pointer_from_mapping, storage_service
 
 
 class ReportService:
@@ -84,7 +85,8 @@ class ReportService:
             row = connection.execute(
                 """
                 SELECT
-                    r.report_id, r.file_path, r.title, r.source_ref, r.source_url, r.source_domain,
+                    r.report_id, r.file_path, r.storage_provider, r.storage_bucket, r.object_key, r.storage_status,
+                    r.title, r.source_ref, r.source_url, r.source_domain,
                     r.source_type, r.skill_name, r.generated_at, r.author, r.status, r.language,
                     r.summary, r.content_hash, r.body_size, r.created_at, r.updated_at,
                     r.folder_id_ref, f.folder_name AS folder_name_ref
@@ -111,15 +113,20 @@ class ReportService:
                     (report_id,),
                 ).fetchall()
             ]
-            item["content"] = read_report_text(item["file_path"])
+            pointer = storage_pointer_from_mapping(item)
+            item["content"] = storage_service.read_text(pointer) if pointer else read_report_text(item["file_path"])
             return item
 
     def get_report_raw(self, report_id: str) -> str | None:
         with db_manager.session() as connection:
-            row = connection.execute("SELECT file_path FROM reports WHERE report_id = ?", (report_id,)).fetchone()
+            row = connection.execute(
+                "SELECT file_path, storage_provider, storage_bucket, object_key, storage_status FROM reports WHERE report_id = ?",
+                (report_id,),
+            ).fetchone()
             if row is None:
                 return None
-            return read_report_text(row["file_path"])
+            pointer = storage_pointer_from_mapping(row)
+            return storage_service.read_text(pointer) if pointer else read_report_text(row["file_path"])
 
     def _load_tags(self, connection, report_ids: list[str]) -> dict[str, list[str]]:
         if not report_ids:

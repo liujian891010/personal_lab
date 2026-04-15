@@ -17,6 +17,10 @@ CREATE TABLE IF NOT EXISTS reports (
     summary          TEXT NOT NULL,
     content_hash     TEXT NOT NULL,
     body_size        INTEGER NOT NULL,
+    storage_provider TEXT,
+    storage_bucket   TEXT,
+    object_key       TEXT,
+    storage_status   TEXT NOT NULL DEFAULT 'legacy',
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
 );
@@ -83,6 +87,10 @@ CREATE TABLE IF NOT EXISTS wiki_pages (
     summary          TEXT,
     confidence       REAL,
     content_hash     TEXT NOT NULL,
+    storage_provider TEXT,
+    storage_bucket   TEXT,
+    object_key       TEXT,
+    storage_status   TEXT NOT NULL DEFAULT 'legacy',
     created_at       TEXT NOT NULL,
     updated_at       TEXT NOT NULL
 );
@@ -211,6 +219,10 @@ CREATE TABLE IF NOT EXISTS upload_jobs (
     error_message      TEXT,
     retry_count        INTEGER NOT NULL DEFAULT 0,
     content_hash       TEXT,
+    storage_provider   TEXT,
+    storage_bucket     TEXT,
+    object_key         TEXT,
+    storage_status     TEXT NOT NULL DEFAULT 'legacy',
     created_at         TEXT NOT NULL,
     updated_at         TEXT NOT NULL,
     completed_at       TEXT,
@@ -235,6 +247,10 @@ CREATE TABLE IF NOT EXISTS upload_artifacts (
     file_path          TEXT NOT NULL,
     content_hash       TEXT,
     byte_size          INTEGER,
+    storage_provider   TEXT,
+    storage_bucket     TEXT,
+    object_key         TEXT,
+    storage_status     TEXT NOT NULL DEFAULT 'legacy',
     created_at         TEXT NOT NULL,
     UNIQUE (upload_id_ref, artifact_kind, file_path)
 );

@@ -75,9 +75,12 @@ class Settings:
     upload_failed_root: Path
     data_root: Path
     logs_root: Path
+    object_storage_root: Path
     sqlite_path: Path
     llm_model: str
     session_secret: str
+    object_storage_provider: str
+    object_storage_bucket: str
     appkey_login_url: str
     appkey_query_param: str
     appkey_app_code: str
@@ -104,9 +107,12 @@ def get_settings() -> Settings:
         upload_failed_root=_resolve_path("UPLOAD_FAILED_ROOT", str(uploads_root / "failed")),
         data_root=data_root,
         logs_root=_resolve_path("LOGS_ROOT", "logs"),
+        object_storage_root=_resolve_path("OBJECT_STORAGE_ROOT", str(data_root / "object_store")),
         sqlite_path=_resolve_path("SQLITE_PATH", str(data_root / "reports.db")),
         llm_model=os.getenv("LLM_MODEL", "claude-sonnet-4-6"),
         session_secret=os.getenv("SESSION_SECRET", "report-center-dev-secret"),
+        object_storage_provider=os.getenv("OBJECT_STORAGE_PROVIDER", "local").strip().lower(),
+        object_storage_bucket=os.getenv("OBJECT_STORAGE_BUCKET", "personal-lab").strip() or "personal-lab",
         appkey_login_url=os.getenv(
             "APPKEY_LOGIN_URL",
             "https://sg-al-cwork-web.mediportal.com.cn/user/login/appkey",
@@ -133,6 +139,7 @@ def ensure_runtime_dirs(current_settings: Settings) -> None:
         current_settings.upload_failed_root,
         current_settings.data_root,
         current_settings.logs_root,
+        current_settings.object_storage_root,
     ):
         directory.mkdir(parents=True, exist_ok=True)
 

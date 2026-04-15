@@ -74,12 +74,27 @@ class DatabaseManager:
             column_name="folder_id_ref",
             column_sql="TEXT REFERENCES report_folders(folder_id) ON DELETE SET NULL",
         )
+        for table_name in ("reports", "wiki_pages", "upload_jobs", "upload_artifacts"):
+            self._ensure_column(connection, table_name=table_name, column_name="storage_provider", column_sql="TEXT")
+            self._ensure_column(connection, table_name=table_name, column_name="storage_bucket", column_sql="TEXT")
+            self._ensure_column(connection, table_name=table_name, column_name="object_key", column_sql="TEXT")
+            self._ensure_column(
+                connection,
+                table_name=table_name,
+                column_name="storage_status",
+                column_sql="TEXT NOT NULL DEFAULT 'legacy'",
+            )
         # indexes for folder_id_ref (ignore errors if already exist)
         for table in ("reports", "upload_jobs"):
             try:
                 connection.execute(
                     f"CREATE INDEX IF NOT EXISTS idx_{table}_folder_id_ref ON {table}(folder_id_ref)"
                 )
+            except Exception:
+                pass
+        for table in ("reports", "wiki_pages", "upload_jobs", "upload_artifacts"):
+            try:
+                connection.execute(f"CREATE INDEX IF NOT EXISTS idx_{table}_object_key ON {table}(object_key)")
             except Exception:
                 pass
 

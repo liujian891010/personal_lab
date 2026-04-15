@@ -15,6 +15,7 @@ from ..indexing.frontmatter import parse_frontmatter
 from ..indexing.scanner import scan_markdown_files
 from .file_service import read_text
 from .fts_utils import build_fts_query
+from .storage_service import storage_pointer_from_mapping, storage_service
 
 
 WIKILINK_PATTERN = re.compile(r"\[\[([^\]]+)\]\]")
@@ -35,6 +36,10 @@ class WikiDocument:
     page_id: str
     page_type: str
     file_path: str
+    storage_provider: str | None
+    storage_bucket: str | None
+    object_key: str | None
+    storage_status: str
     slug: str
     title: str
     status: str
@@ -60,6 +65,17 @@ class WikiService:
         self.ensure_knowledge_dirs()
         files = scan_markdown_files(self._knowledge_root())
         documents: list[WikiDocument] = [self._parse_wiki_file(path) for path in files]
+        for document in documents:
+            pointer = storage_service.write_workspace_text(
+                workspace_id=self._workspace_id(),
+                namespace="knowledge",
+                relative_path=document.file_path,
+                text=document.raw_content,
+            )
+            document.storage_provider = pointer.storage_provider
+            document.storage_bucket = pointer.storage_bucket
+            document.object_key = pointer.object_key
+            document.storage_status = pointer.storage_status
         self._validate_unique_constraints(documents)
 
         with db_manager.session() as connection:
@@ -161,7 +177,7 @@ class WikiService:
                 """
                 SELECT
                     page_id, page_type, file_path, slug, title, status,
-                    summary, confidence, content_hash, created_at, updated_at
+                    summary, confidence, content_hash, storage_provider, storage_bucket, object_key, storage_status, created_at, updated_at
                 FROM wiki_pages
                 WHERE page_id = ?
                 """,
@@ -178,7 +194,7 @@ class WikiService:
                 """
                 SELECT
                     page_id, page_type, file_path, slug, title, status,
-                    summary, confidence, content_hash, created_at, updated_at
+                    summary, confidence, content_hash, storage_provider, storage_bucket, object_key, storage_status, created_at, updated_at
                 FROM wiki_pages
                 WHERE slug = ?
                 """,
@@ -216,7 +232,8 @@ class WikiService:
                 (item["page_id"],),
             ).fetchall()
         ]
-        item["content"] = read_text(self._knowledge_root(), item["file_path"])
+        pointer = storage_pointer_from_mapping(item)
+        item["content"] = storage_service.read_text(pointer) if pointer else read_text(self._knowledge_root(), item["file_path"])
         return item
 
     def _parse_wiki_file(self, path: Path) -> WikiDocument:
@@ -248,6 +265,10 @@ class WikiService:
             page_id=page_id,
             page_type=page_type,
             file_path=relative_path,
+            storage_provider=None,
+            storage_bucket=None,
+            object_key=None,
+            storage_status="legacy",
             slug=slug,
             title=title,
             status=status,
@@ -296,9 +317,9 @@ class WikiService:
             """
             INSERT INTO wiki_pages (
                 page_id, page_type, file_path, slug, title, status, summary,
-                confidence, content_hash, created_at, updated_at
+                confidence, content_hash, storage_provider, storage_bucket, object_key, storage_status, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 document.page_id,
@@ -310,6 +331,10 @@ class WikiService:
                 document.summary,
                 document.confidence,
                 document.content_hash,
+                document.storage_provider,
+                document.storage_bucket,
+                document.object_key,
+                document.storage_status,
                 document.created_at,
                 document.updated_at,
             ),

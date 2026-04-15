@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import mimetypes
 import re
 import sqlite3
@@ -19,6 +20,7 @@ from ..config import get_workspace_reports_root
 from ..db import db_manager, row_to_dict
 from .file_service import resolve_raw_upload_path, resolve_upload_storage_path, resolve_upload_working_path
 from .compile_service import compile_service
+from .storage_service import StoragePointer, storage_pointer_from_mapping, storage_service
 from .sync_service import sync_service
 
 
@@ -93,6 +95,12 @@ class UploadService:
             if destination.exists():
                 destination.unlink(missing_ok=True)
             raise
+        original_pointer = storage_service.write_workspace_bytes(
+            workspace_id=self._workspace_id(),
+            namespace="uploads/original",
+            relative_path=storage_path,
+            data=destination.read_bytes(),
+        )
 
         upload_status = "queued" if auto_process else "uploaded"
         processing_stage = "stored"
@@ -107,9 +115,10 @@ class UploadService:
                         title, upload_status, processing_stage, report_id_ref,
                         auto_process, compile_mode, auto_compile, triggered_by,
                         error_code, error_message, retry_count, content_hash,
+                        storage_provider, storage_bucket, object_key, storage_status,
                         created_at, updated_at, completed_at, folder_id_ref
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, ?, NULL, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, NULL, NULL, 0, ?, ?, ?, ?, ?, ?, ?, NULL, ?)
                     """,
                     (
                         upload_id,
@@ -129,6 +138,10 @@ class UploadService:
                         1 if auto_compile else 0,
                         "user_upload",
                         content_hash,
+                        original_pointer.storage_provider,
+                        original_pointer.storage_bucket,
+                        original_pointer.object_key,
+                        original_pointer.storage_status,
                         now.isoformat(),
                         now.isoformat(),
                         folder_id,
@@ -141,6 +154,7 @@ class UploadService:
                     file_path=f"uploads/{storage_path}",
                     content_hash=content_hash,
                     byte_size=file_size_bytes,
+                    pointer=original_pointer,
                     created_at=now.isoformat(),
                 )
         except sqlite3.Error:
@@ -223,6 +237,7 @@ class UploadService:
                        uj.file_ext, uj.file_size_bytes, uj.source_ref, uj.source_type, uj.upload_status,
                        uj.processing_stage, uj.report_id_ref, uj.auto_process, uj.compile_mode, uj.auto_compile,
                        uj.triggered_by, uj.error_code, uj.error_message, uj.retry_count, uj.content_hash,
+                       uj.storage_provider, uj.storage_bucket, uj.object_key, uj.storage_status,
                        uj.created_at, uj.updated_at, uj.completed_at,
                        uj.folder_id_ref, f.folder_name AS folder_name_ref
                 FROM upload_jobs uj
@@ -236,7 +251,8 @@ class UploadService:
 
             artifacts = connection.execute(
                 """
-                SELECT artifact_kind, file_path, content_hash, byte_size, created_at
+                SELECT artifact_kind, file_path, content_hash, byte_size,
+                       storage_provider, storage_bucket, object_key, storage_status, created_at
                 FROM upload_artifacts
                 WHERE upload_id_ref = ?
                 ORDER BY id ASC
@@ -298,6 +314,12 @@ class UploadService:
             raw_path = resolve_raw_upload_path(raw_relative)
             raw_path.parent.mkdir(parents=True, exist_ok=True)
             raw_path.write_text(normalized_text, encoding="utf-8")
+            extracted_pointer = storage_service.write_workspace_text(
+                workspace_id=self._workspace_id(),
+                namespace="uploads/extracted",
+                relative_path=raw_relative,
+                text=normalized_text,
+            )
 
             with db_manager.session() as connection:
                 self._upsert_artifact(
@@ -307,6 +329,7 @@ class UploadService:
                     file_path=f"raw/uploads/{raw_relative}",
                     content_hash=hashlib.sha1(normalized_text.encode("utf-8")).hexdigest(),
                     byte_size=len(normalized_text.encode("utf-8")),
+                    pointer=extracted_pointer,
                     created_at=created_at,
                 )
                 self._update_upload_status(
@@ -323,6 +346,12 @@ class UploadService:
 
             report_metadata = self._build_report_metadata(upload_id, normalized_text)
             report_relative_path = self._write_report_preview(upload_id, report_metadata, normalized_text)
+            report_preview_pointer = storage_service.write_workspace_text(
+                workspace_id=self._workspace_id(),
+                namespace="reports",
+                relative_path=report_relative_path,
+                text=(get_workspace_reports_root(self._workspace_id()) / report_relative_path).read_text(encoding="utf-8"),
+            )
 
             with db_manager.session() as connection:
                 self._upsert_artifact(
@@ -332,6 +361,7 @@ class UploadService:
                     file_path=f"reports/{report_relative_path}",
                     content_hash=hashlib.sha1(normalized_text.encode("utf-8")).hexdigest(),
                     byte_size=len(normalized_text.encode("utf-8")),
+                    pointer=report_preview_pointer,
                     created_at=self._now().isoformat(),
                 )
                 self._update_upload_status(
@@ -438,7 +468,7 @@ class UploadService:
         with db_manager.session() as connection:
             row = connection.execute(
                 """
-                SELECT file_path
+                SELECT file_path, storage_provider, storage_bucket, object_key, storage_status
                 FROM upload_artifacts
                 WHERE upload_id_ref = ? AND artifact_kind = 'extracted_text'
                 ORDER BY id DESC
@@ -449,6 +479,9 @@ class UploadService:
         if row is None:
             return None
         file_path = str(row["file_path"])
+        pointer = storage_pointer_from_mapping(row)
+        if pointer:
+            return storage_service.read_text(pointer)
         prefix = "raw/uploads/"
         if not file_path.startswith(prefix):
             raise UploadValidationError(f"unexpected extracted text path: {file_path}")
@@ -459,7 +492,7 @@ class UploadService:
         with db_manager.session() as connection:
             row = connection.execute(
                 """
-                SELECT file_path
+                SELECT file_path, storage_provider, storage_bucket, object_key, storage_status
                 FROM upload_artifacts
                 WHERE upload_id_ref = ? AND artifact_kind = 'report_preview'
                 ORDER BY id DESC
@@ -470,6 +503,9 @@ class UploadService:
         if row is None:
             return None
         file_path = str(row["file_path"])
+        pointer = storage_pointer_from_mapping(row)
+        if pointer:
+            return storage_service.read_text(pointer)
         prefix = "reports/"
         if not file_path.startswith(prefix):
             raise UploadValidationError(f"unexpected report preview path: {file_path}")
@@ -533,7 +569,8 @@ class UploadService:
                    file_size_bytes, source_ref, source_type, title, upload_status,
                    processing_stage, report_id_ref, auto_process, compile_mode,
                    auto_compile, triggered_by, error_code, error_message, retry_count,
-                   content_hash, created_at, updated_at, completed_at
+                   content_hash, storage_provider, storage_bucket, object_key, storage_status,
+                   created_at, updated_at, completed_at
             FROM upload_jobs
             WHERE upload_id = ?
             """,
@@ -598,20 +635,37 @@ class UploadService:
         file_path: str,
         content_hash: str | None,
         byte_size: int | None,
+        pointer: StoragePointer | None,
         created_at: str,
     ) -> None:
         connection.execute(
             """
             INSERT INTO upload_artifacts (
-                upload_id_ref, artifact_kind, file_path, content_hash, byte_size, created_at
+                upload_id_ref, artifact_kind, file_path, content_hash, byte_size,
+                storage_provider, storage_bucket, object_key, storage_status, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(upload_id_ref, artifact_kind, file_path) DO UPDATE SET
                 content_hash = excluded.content_hash,
                 byte_size = excluded.byte_size,
+                storage_provider = excluded.storage_provider,
+                storage_bucket = excluded.storage_bucket,
+                object_key = excluded.object_key,
+                storage_status = excluded.storage_status,
                 created_at = excluded.created_at
             """,
-            (upload_id, artifact_kind, file_path, content_hash, byte_size, created_at),
+            (
+                upload_id,
+                artifact_kind,
+                file_path,
+                content_hash,
+                byte_size,
+                pointer.storage_provider if pointer else None,
+                pointer.storage_bucket if pointer else None,
+                pointer.object_key if pointer else None,
+                pointer.storage_status if pointer else "legacy",
+                created_at,
+            ),
         )
 
     def _build_report_metadata(self, upload_id: str, extracted_text: str) -> dict[str, str]:
@@ -711,22 +765,28 @@ class UploadService:
             row = self._load_upload_job(connection, upload_id)
 
         file_ext = str(row["file_ext"])
-        storage_path = str(row["storage_path"])
-        source_path = resolve_upload_storage_path(storage_path)
+        source_bytes = self._read_upload_blob(row)
 
         if file_ext in {"txt", "md"}:
-            return source_path.read_text(encoding="utf-8"), "txt"
+            return source_bytes.decode("utf-8"), "txt"
         if file_ext in {"html", "htm"}:
-            html = source_path.read_text(encoding="utf-8")
+            html = source_bytes.decode("utf-8")
             soup = BeautifulSoup(html, "html.parser")
             return soup.get_text("\n"), "txt"
         if file_ext == "docx":
-            document = DocxDocument(str(source_path))
+            document = DocxDocument(io.BytesIO(source_bytes))
             text = "\n\n".join(paragraph.text for paragraph in document.paragraphs if paragraph.text.strip())
             return text, "txt"
         if file_ext == "pdf":
-            return self._extract_pdf_text(source_path), "txt"
+            return self._extract_pdf_text(source_bytes), "txt"
         raise UploadValidationError(f"unsupported file extension for extraction: {file_ext}")
+
+    def _read_upload_blob(self, row: sqlite3.Row) -> bytes:
+        pointer = storage_pointer_from_mapping(row)
+        if pointer:
+            return storage_service.read_bytes(pointer)
+        storage_path = str(row["storage_path"])
+        return resolve_upload_storage_path(storage_path).read_bytes()
 
     def _normalize_extracted_text(self, text: str) -> str:
         lines = [line.rstrip() for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n")]
@@ -734,28 +794,28 @@ class UploadService:
         collapsed = re.sub(r"\n{3,}", "\n\n", collapsed)
         return collapsed.strip()
 
-    def _extract_pdf_text(self, source_path: Path) -> str:
-        text_layer = self._extract_pdf_text_layer(source_path)
+    def _extract_pdf_text(self, source_bytes: bytes) -> str:
+        text_layer = self._extract_pdf_text_layer(source_bytes)
         normalized_text_layer = self._normalize_extracted_text(text_layer)
         if len(normalized_text_layer) >= PDF_TEXT_LAYER_MIN_LENGTH:
             return normalized_text_layer
 
-        ocr_text = self._extract_pdf_text_via_ocr(source_path)
+        ocr_text = self._extract_pdf_text_via_ocr(source_bytes)
         normalized_ocr_text = self._normalize_extracted_text(ocr_text)
         if len(normalized_ocr_text) > len(normalized_text_layer):
             return normalized_ocr_text
         return normalized_text_layer
 
-    def _extract_pdf_text_layer(self, source_path: Path) -> str:
-        reader = PdfReader(str(source_path))
+    def _extract_pdf_text_layer(self, source_bytes: bytes) -> str:
+        reader = PdfReader(io.BytesIO(source_bytes))
         parts = []
         for page in reader.pages:
             parts.append(page.extract_text() or "")
         return "\n\n".join(parts)
 
-    def _extract_pdf_text_via_ocr(self, source_path: Path) -> str:
+    def _extract_pdf_text_via_ocr(self, source_bytes: bytes) -> str:
         ocr_engine = self._get_ocr_engine()
-        document = fitz.open(source_path)
+        document = fitz.open(stream=source_bytes, filetype="pdf")
         parts: list[str] = []
 
         try:

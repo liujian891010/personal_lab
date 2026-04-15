@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 
 from fastapi import APIRouter, Depends, Header, HTTPException, status
 
@@ -14,7 +14,7 @@ from ..workspace import UserContext, reset_current_user_context, set_current_use
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-def _bind_user_context_from_appkey(appkey: str | None, *, required: bool) -> Iterator[UserContext | None]:
+async def _bind_user_context_from_appkey(appkey: str | None, *, required: bool) -> AsyncIterator[UserContext | None]:
     normalized_appkey = (appkey or "").strip()
     if not normalized_appkey:
         if required:
@@ -35,12 +35,18 @@ def _bind_user_context_from_appkey(appkey: str | None, *, required: bool) -> Ite
         reset_current_user_context(token)
 
 
-def bind_optional_user_context(x_appkey: str | None = Header(default=None, alias="X-Appkey")) -> Iterator[UserContext | None]:
-    yield from _bind_user_context_from_appkey(x_appkey, required=False)
+async def bind_optional_user_context(
+    x_appkey: str | None = Header(default=None, alias="X-Appkey"),
+) -> AsyncIterator[UserContext | None]:
+    async for user in _bind_user_context_from_appkey(x_appkey, required=False):
+        yield user
 
 
-def require_user(x_appkey: str | None = Header(default=None, alias="X-Appkey")) -> Iterator[UserContext]:
-    yield from _bind_user_context_from_appkey(x_appkey, required=True)
+async def require_user(x_appkey: str | None = Header(default=None, alias="X-Appkey")) -> AsyncIterator[UserContext]:
+    async for user in _bind_user_context_from_appkey(x_appkey, required=True):
+        if user is None:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        yield user
 
 
 @router.get("/me", response_model=AuthUserResponse)

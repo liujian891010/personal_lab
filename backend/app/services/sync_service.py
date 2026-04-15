@@ -9,6 +9,7 @@ from ..config import encode_report_storage_path, get_workspace_reports_root
 from ..db import db_manager
 from ..indexing.scanner import scan_markdown_files
 from .metadata_service import ReportDocument, normalize_tag, parse_report_file
+from .storage_service import storage_service
 
 
 def utc_now_iso() -> str:
@@ -65,6 +66,16 @@ class SyncService:
                             primary_root=all_roots[0],
                         )
                         document.file_path = storage_path
+                        pointer = storage_service.write_workspace_text(
+                            workspace_id=self._workspace_id(),
+                            namespace="reports",
+                            relative_path=document.file_path,
+                            text=document.raw_content,
+                        )
+                        document.storage_provider = pointer.storage_provider
+                        document.storage_bucket = pointer.storage_bucket
+                        document.object_key = pointer.object_key
+                        document.storage_status = pointer.storage_status
                         documents.append(document)
                     except Exception as exc:  # noqa: BLE001
                         result.failed_count += 1
@@ -165,7 +176,8 @@ class SyncService:
             """
             SELECT file_path, report_id, title, source_ref, source_url, source_domain,
                    source_type, skill_name, generated_at, author, status, language,
-                   summary, content_hash, body_size
+                   summary, content_hash, body_size, storage_provider, storage_bucket,
+                   object_key, storage_status
             FROM reports
             """
         ).fetchall()
@@ -220,9 +232,10 @@ class SyncService:
             INSERT INTO reports (
                 report_id, file_path, title, source_ref, source_url, source_domain, source_type,
                 skill_name, generated_at, author, status, language, summary, content_hash,
-                body_size, created_at, updated_at
+                body_size, storage_provider, storage_bucket, object_key, storage_status,
+                created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(report_id) DO UPDATE SET
                 file_path = excluded.file_path,
                 title = excluded.title,
@@ -238,6 +251,10 @@ class SyncService:
                 summary = excluded.summary,
                 content_hash = excluded.content_hash,
                 body_size = excluded.body_size,
+                storage_provider = excluded.storage_provider,
+                storage_bucket = excluded.storage_bucket,
+                object_key = excluded.object_key,
+                storage_status = excluded.storage_status,
                 updated_at = excluded.updated_at
             """,
             (
@@ -256,6 +273,10 @@ class SyncService:
                 document.summary,
                 document.content_hash,
                 document.body_size,
+                document.storage_provider,
+                document.storage_bucket,
+                document.object_key,
+                document.storage_status,
                 created_at,
                 now,
             ),

@@ -13,6 +13,10 @@ from ..indexing.markdown_parser import extract_urls
 class ReportDocument:
     report_id: str
     file_path: str
+    storage_provider: str | None
+    storage_bucket: str | None
+    object_key: str | None
+    storage_status: str
     title: str
     source_ref: str
     source_url: str | None
@@ -73,6 +77,10 @@ def parse_report_file(path: Path, root: Path) -> ReportDocument:
     return ReportDocument(
         report_id=str(metadata["report_id"]),
         file_path=path.relative_to(root).as_posix(),
+        storage_provider=None,
+        storage_bucket=None,
+        object_key=None,
+        storage_status="legacy",
         title=str(metadata["title"]),
         source_ref=source_ref,
         source_url=str(source_url) if source_url else None,
