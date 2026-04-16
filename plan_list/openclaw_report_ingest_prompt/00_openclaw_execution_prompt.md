@@ -294,13 +294,30 @@ http://127.0.0.1:8002/app/#/report-only/{report_id}
 - 不显示 topbar
 - 不显示主导航
 - 只展示报告正文和基础元信息
-- 更适合直接阅读、演示或分享
+- 更适合直接阅读、演示；如果要外发分享，请使用带 `share_token` 的分享链接
 
 例如：
 
 ```text
 http://127.0.0.1:8002/app/#/report-only/rpt_20260415_110000_a1b2c3d4
 ```
+
+补充说明：
+
+- 裸链接 `#/report-only/{report_id}` 仍然要求当前浏览器已经登录
+- 如果要把链接直接发给别人，并且对方打开时不输入 APPKEY，必须使用“带 `share_token` 的分享链接”
+
+分享链接示例：
+
+```text
+http://127.0.0.1:8002/app/#/report-only/rpt_20260415_142500_claude_code_china?share_token=eyJ2IjoxLCJyZXBvcnRfaWQiOiJycHRfMjAyNjA0MTVfMTQyNTAwX2NsYXVkZV9jb2RlX2NoaW5hIiwid29ya3NwYWNlX2lkIjoiMDIxMDAyMzQxODY3MjA3NyIsImV4cCI6MTc3Njg0OTAyNX0.a_eDxD9s7q_Q9vOjUa4kpQdFy9SWt59TpCrYek1MHL0
+```
+
+这个分享链接的含义是：
+
+- 只允许匿名读取这一篇 report
+- 不开放列表、搜索、上传、删除
+- token 有过期时间，过期后链接失效
 
 ## 入库成功后的最小验证
 
@@ -322,4 +339,10 @@ http://127.0.0.1:8002/app/#/reports/{report_id}
 
 ```text
 http://127.0.0.1:8002/app/#/report-only/{report_id}
+```
+
+4. 如果需要对外分享，确认已经生成“带 `share_token` 的分享链接”，并验证该链接在未登录状态下也能直接打开：
+
+```text
+http://127.0.0.1:8002/app/#/report-only/{report_id}?share_token=<share_token>
 ```

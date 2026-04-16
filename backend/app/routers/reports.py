@@ -1,11 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from urllib.parse import quote
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import PlainTextResponse
 
 from .auth import require_user
-from ..schemas.report import ReportDetail, ReportListResponse
+from ..schemas.report import ReportDetail, ReportListResponse, ReportShareResponse
 from ..services.report_service import ReportAlreadyDeletedError, ReportNotFoundError, report_service
+from ..services.report_share_service import report_share_service
+from ..workspace import get_current_user_context
 
 
 router = APIRouter(prefix="/api", tags=["reports"], dependencies=[Depends(require_user)])
@@ -49,6 +53,35 @@ def get_report_raw(report_id: str) -> PlainTextResponse:
     if content is None:
         raise HTTPException(status_code=404, detail="report not found")
     return PlainTextResponse(content)
+
+
+@router.post("/reports/{report_id}/share", response_model=ReportShareResponse)
+def create_report_share(
+    report_id: str,
+    request: Request,
+    expires_in_hours: int = Query(default=168, ge=1, le=720),
+) -> ReportShareResponse:
+    data = report_service.get_report(report_id)
+    if data is None:
+        raise HTTPException(status_code=404, detail="report not found")
+    current_user = get_current_user_context()
+    if current_user is None:
+        raise HTTPException(status_code=401, detail="authentication required")
+    share = report_share_service.create_share_link(
+        report_id=report_id,
+        workspace_id=current_user.workspace_id,
+        expires_in_hours=expires_in_hours,
+    )
+    share_url = (
+        f"{str(request.base_url).rstrip('/')}/app/#/report-only/{quote(report_id, safe='')}"
+        f"?share_token={quote(share.share_token, safe='')}"
+    )
+    return ReportShareResponse(
+        report_id=report_id,
+        share_token=share.share_token,
+        share_url=share_url,
+        expires_at=share.expires_at,
+    )
 
 
 @router.delete("/reports/{report_id}", status_code=status.HTTP_204_NO_CONTENT)

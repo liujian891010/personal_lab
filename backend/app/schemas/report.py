@@ -42,3 +42,10 @@ class ReportDetail(ReportSummary):
     updated_at: str
     content: str
     links: list[ReportLink] = Field(default_factory=list)
+
+
+class ReportShareResponse(BaseModel):
+    report_id: str
+    share_token: str
+    share_url: str
+    expires_at: str

@@ -34,10 +34,6 @@ CREATE INDEX IF NOT EXISTS idx_reports_generated_at ON reports(generated_at DESC
 CREATE INDEX IF NOT EXISTS idx_reports_source_domain ON reports(source_domain);
 CREATE INDEX IF NOT EXISTS idx_reports_skill_name ON reports(skill_name);
 CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
-CREATE INDEX IF NOT EXISTS idx_reports_folder_id_ref ON reports(folder_id_ref);
-CREATE INDEX IF NOT EXISTS idx_reports_deleted_at ON reports(deleted_at);
-CREATE INDEX IF NOT EXISTS idx_reports_purge_after ON reports(purge_after);
-CREATE INDEX IF NOT EXISTS idx_reports_storage_cleanup_status ON reports(storage_cleanup_status);
 
 CREATE TABLE IF NOT EXISTS report_tags (
     report_id_ref    TEXT NOT NULL REFERENCES reports(report_id) ON DELETE CASCADE,

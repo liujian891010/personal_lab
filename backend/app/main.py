@@ -10,6 +10,7 @@ from .db import db_manager
 from .routers.auth import router as auth_router
 from .routers.health import router as health_router
 from .routers.compile import router as compile_router
+from .routers.public_reports import router as public_reports_router
 from .routers.query import router as query_router
 from .routers.reports import router as reports_router
 from .routers.search import router as search_router
@@ -34,6 +35,7 @@ app = FastAPI(
 
 app.include_router(auth_router)
 app.include_router(health_router)
+app.include_router(public_reports_router)
 app.include_router(sync_router)
 app.include_router(uploads_router)
 app.include_router(folders_router)

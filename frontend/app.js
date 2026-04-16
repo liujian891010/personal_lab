@@ -110,6 +110,22 @@ function buildHash(path, params = {}) {
   return `#${path}${search ? `?${search}` : ""}`;
 }
 
+function isPublicApiPath(path) {
+  return String(path || "").startsWith("/api/public/");
+}
+
+async function copyTextToClipboard(value) {
+  const text = String(value ?? "");
+  if (!text) {
+    throw new Error("Nothing to copy.");
+  }
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  window.prompt("Copy this link", text);
+}
+
 function getRoute() {
   const rawHash = location.hash.replace(/^#/, "") || "/reports";
   const [pathPart, searchPart = ""] = rawHash.split("?");
@@ -160,7 +176,7 @@ async function apiRequest(path, options = {}) {
       void error;
     }
     const apiError = new ApiError(detail, response.status);
-    if (response.status === 401 && path !== "/api/auth/me" && path !== "/api/auth/login") {
+    if (response.status === 401 && path !== "/api/auth/me" && path !== "/api/auth/login" && !isPublicApiPath(path)) {
       await handleUnauthorized(detail);
     }
     throw apiError;
@@ -200,7 +216,7 @@ async function apiRequestText(path, options = {}) {
       void error;
     }
     const apiError = new ApiError(detail, response.status);
-    if (response.status === 401) {
+    if (response.status === 401 && !isPublicApiPath(path)) {
       await handleUnauthorized(detail);
     }
     throw apiError;
@@ -231,7 +247,7 @@ async function apiPostForm(path, formData) {
       void error;
     }
     const apiError = new ApiError(detail, response.status);
-    if (response.status === 401) {
+    if (response.status === 401 && !isPublicApiPath(path)) {
       await handleUnauthorized(detail);
     }
     throw apiError;
@@ -1547,6 +1563,10 @@ async function renderReportDetail(reportId) {
     .querySelector('.button-row[style="margin-bottom: 16px;"]')
     ?.insertAdjacentHTML("beforeend", '<button class="ghost-button" id="delete-report-detail" type="button">Delete Report</button>');
 
+  document
+    .querySelector('.button-row[style="margin-bottom: 16px;"]')
+    ?.insertAdjacentHTML("beforeend", '<button class="ghost-button" id="share-report-detail" type="button">Copy Share Link</button>');
+
   document.querySelector("#move-report-detail")?.addEventListener("click", async () => {
     try {
       const targetFolderId = promptForFolderSelection(folders, data.folder_id_ref || null);
@@ -1570,11 +1590,26 @@ async function renderReportDetail(reportId) {
       showToast(error.message || "Delete failed.", "bad");
     }
   });
+  document.querySelector("#share-report-detail")?.addEventListener("click", async () => {
+    try {
+      const result = await apiPost(`/api/reports/${encodeURIComponent(reportId)}/share`, {});
+      await copyTextToClipboard(result.share_url);
+      showToast("Share link copied.", "good");
+    } catch (error) {
+      showToast(error.message || "Share link creation failed.", "bad");
+    }
+  });
 }
 
-async function renderReportOnlyDetail(reportId) {
-  const data = await apiGet(`/api/reports/${encodeURIComponent(reportId)}`);
+async function renderReportOnlyDetail(reportId, shareToken = "") {
+  const detailPath = shareToken
+    ? `/api/public/reports/${encodeURIComponent(reportId)}?${serializeParams({ share_token: shareToken })}`
+    : `/api/reports/${encodeURIComponent(reportId)}`;
+  const data = await apiGet(detailPath);
   const content = renderMarkdownLite(stripFrontmatter(data.content));
+  const fullViewAction = state.currentUser
+    ? `<a class="ghost-button" href="${buildHash(`/reports/${encodeURIComponent(data.report_id)}`)}">ç€¹å±¾æš£éšåº¡å½´ç‘™å——æµ˜</a>`
+    : "";
 
   appNode.innerHTML = `
     <section class="report-reader-shell">
@@ -1626,6 +1661,9 @@ async function renderReportOnlyDetail(reportId) {
       </article>
     </section>
   `;
+  if (!state.currentUser) {
+    document.querySelector(".report-reader-actions .ghost-button")?.remove();
+  }
 }
 
 async function renderWikiView(route) {
@@ -2292,11 +2330,13 @@ async function renderNotFound() {
 }
 
 async function renderRoute() {
-  if (!state.currentUser) {
+  const route = getRoute();
+  const shareToken = route.section === "report-only" ? String(route.params.get("share_token") || "").trim() : "";
+  const isPublicReportOnly = route.section === "report-only" && Boolean(shareToken);
+  if (!state.currentUser && !isPublicReportOnly) {
     renderLoginView();
     return;
   }
-  const route = getRoute();
   const isReportOnlyRoute = route.section === "report-only";
   setTopbarVisible(!isReportOnlyRoute);
   setLayoutMode(isReportOnlyRoute ? "reader" : "app");
@@ -2309,7 +2349,7 @@ async function renderRoute() {
   try {
     switch (route.section) {
       case "report-only":
-        await renderReportOnlyDetail(route.detail);
+        await renderReportOnlyDetail(route.detail, shareToken);
         break;
       case "uploads":
         await renderUploadsView(route);
@@ -2356,6 +2396,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   restoreClientAuthState();
   renderSessionChrome();
   await refreshHealth();
+  const route = getRoute();
+  const isPublicReportOnly = route.section === "report-only" && Boolean(String(route.params.get("share_token") || "").trim());
+  if (isPublicReportOnly) {
+    if (!state.appkey) {
+      state.currentUser = null;
+      renderSessionChrome();
+    }
+    await renderRoute();
+    return;
+  }
   if (!state.appkey) {
     renderLoginView();
     return;
