@@ -5,7 +5,6 @@ const sessionSlotNode = document.querySelector("#session-slot");
 const topbarNode = document.querySelector(".topbar");
 const appShellNode = document.querySelector(".app-shell");
 const EXTERNAL_APPKEY_LOGIN_URL = "https://sg-al-cwork-web.mediportal.com.cn/user/login/appkey";
-const DEFAULT_APPKEY = "A2d5J8fCDNHT3Vbkv3dndsEzoQ3zMNsv";
 const EXTERNAL_APP_CODE = "personal_lab";
 
 const state = {
@@ -80,6 +79,36 @@ function toneForStatus(value) {
 
 function badge(label, tone = "neutral") {
   return `<span class="badge ${tone}">${escapeHtml(label)}</span>`;
+}
+
+function localizeLabel(value) {
+  const text = String(value ?? "").trim();
+  const map = {
+    published: "已发布",
+    draft: "草稿",
+    unknown: "未知来源",
+    report: "报告",
+    unfiled: "未归档",
+    uploaded: "已上传",
+    queued: "排队中",
+    processing: "处理中",
+    completed: "已完成",
+    failed: "失败",
+    needs_review: "待复核",
+    received: "已接收",
+    stored: "已存储",
+    extracting: "提取中",
+    normalizing: "规范化中",
+    summarizing: "摘要生成中",
+    report_generating: "报告生成中",
+    syncing: "同步中",
+    compiling: "编译中",
+    done: "完成",
+    error: "错误",
+    true: "是",
+    false: "否",
+  };
+  return map[text.toLowerCase()] || text;
 }
 
 function chip(label, tone = "neutral") {
@@ -575,10 +604,6 @@ function renderLoginView(message = "") {
       </form>
     </section>
   `;
-  const appkeyInputNode = document.querySelector('#login-form input[name="appkey"]');
-  if (appkeyInputNode && !appkeyInputNode.value) {
-    appkeyInputNode.value = DEFAULT_APPKEY;
-  }
   document.querySelector("#login-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -764,23 +789,73 @@ function renderPageShell({ eyebrow, title, copy, toolbar = "", body }) {
 }
 
 function promptForFolderSelection(folders, currentFolderId = null) {
-  const options = ["(Unfiled)", ...folders.map((folder) => folder.folder_name)];
-  const currentIndex = currentFolderId ? folders.findIndex((folder) => folder.folder_id === currentFolderId) + 1 : 0;
-  const choice = window.prompt(
-    `Move report to:\n${options.map((option, index) => `${index}: ${option}`).join("\n")}\n\nEnter index:`,
-    String(Math.max(currentIndex, 0))
-  );
-  if (choice === null) {
-    return undefined;
-  }
-  const selectedIndex = Number(choice);
-  if (Number.isNaN(selectedIndex) || selectedIndex < 0 || selectedIndex >= options.length) {
-    throw new Error("Invalid folder index.");
-  }
-  return selectedIndex === 0 ? null : folders[selectedIndex - 1].folder_id;
+  return new Promise((resolve) => {
+    const modalNode = document.createElement("div");
+    modalNode.className = "modal-backdrop";
+    modalNode.innerHTML = `
+      <div class="modal-card folder-picker-modal" role="dialog" aria-modal="true" aria-labelledby="folder-picker-title">
+        <div class="folder-picker-head">
+          <div>
+            <p class="eyebrow">移动报告</p>
+            <h3 id="folder-picker-title">选择文件夹</h3>
+          </div>
+          <button class="ghost-button folder-picker-close" type="button">取消</button>
+        </div>
+        <div class="folder-picker-list">
+          <button class="folder-picker-option ${!currentFolderId ? "active" : ""}" type="button" data-folder-target="">
+            <span class="folder-picker-name">未归档</span>
+            <span class="subtle">保持该报告不放入任何文件夹</span>
+          </button>
+          ${folders
+            .map(
+              (folder) => `
+                <button
+                  class="folder-picker-option ${currentFolderId === folder.folder_id ? "active" : ""}"
+                  type="button"
+                  data-folder-target="${escapeHtml(folder.folder_id)}"
+                >
+                  <span class="folder-picker-name">${escapeHtml(folder.folder_name)}</span>
+                  <span class="subtle">${escapeHtml(String(folder.report_count))} 篇报告</span>
+                </button>
+              `
+            )
+            .join("")}
+        </div>
+      </div>
+    `;
+
+    const cleanup = (value) => {
+      modalNode.remove();
+      document.removeEventListener("keydown", handleKeydown);
+      resolve(value);
+    };
+
+    const handleKeydown = (event) => {
+      if (event.key === "Escape") {
+        cleanup(undefined);
+      }
+    };
+
+    modalNode.addEventListener("click", (event) => {
+      if (event.target === modalNode) {
+        cleanup(undefined);
+      }
+    });
+
+    modalNode.querySelector(".folder-picker-close")?.addEventListener("click", () => cleanup(undefined));
+    modalNode.querySelectorAll("[data-folder-target]").forEach((button) => {
+      button.addEventListener("click", () => {
+        const value = button.dataset.folderTarget || null;
+        cleanup(value);
+      });
+    });
+
+    document.addEventListener("keydown", handleKeydown);
+    document.body.appendChild(modalNode);
+  });
 }
 
-async function moveReportToFolder(reportId, folderId, successMessage = "Report moved.") {
+async function moveReportToFolder(reportId, folderId, successMessage = "报告已移动。") {
   await apiPost(`/api/reports/${encodeURIComponent(reportId)}/move-folder`, { folder_id: folderId });
   showToast(successMessage, "good");
 }
@@ -842,7 +917,7 @@ function _bindFolderNavEvents(folders, currentFolderId, unfiled, filterParams) {
       e.preventDefault();
       const reportId = btn.dataset.moveReport;
       try {
-        const targetFolderId = promptForFolderSelection(folders, btn.dataset.currentFolderId || null);
+        const targetFolderId = await promptForFolderSelection(folders, btn.dataset.currentFolderId || null);
         if (targetFolderId === undefined) return;
         await moveReportToFolder(reportId, targetFolderId, "已移动到目标文件夹");
         renderRoute();
@@ -878,7 +953,7 @@ function _bindFolderNavEvents(folders, currentFolderId, unfiled, filterParams) {
       if (!reportId) return;
       const targetFolderId = li.dataset.dropFolderId || li.dataset.folderId || null;
       try {
-        await moveReportToFolder(reportId, targetFolderId, targetFolderId ? "已归档到文件夹" : "已移回 Unfiled");
+        await moveReportToFolder(reportId, targetFolderId, targetFolderId ? "已归档到文件夹" : "已移回未归档");
         renderRoute();
       } catch (err) {
         showToast(err.message, "bad");
@@ -926,6 +1001,9 @@ async function renderReportsView(route) {
     return;
   }
 
+  await renderReportsAtlasView(route);
+  return;
+
   const q = route.params.get("q") || "";
   const page = Number(route.params.get("page") || "1");
   const tag = route.params.get("tag") || "";
@@ -954,10 +1032,10 @@ async function renderReportsView(route) {
       </div>
       <ul class="folder-nav-list">
         <li class="${!folderId && !unfiled ? "active" : ""}">
-          <a href="${buildHash("/reports", { tag, source_domain: sourceDomain, status, skill_name: skillName })}">All Reports</a>
+          <a href="${buildHash("/reports", { tag, source_domain: sourceDomain, status, skill_name: skillName })}">全部报告</a>
         </li>
         <li class="folder-nav-item ${unfiled ? "active" : ""}" data-folder-id="">
-          <a href="${buildHash("/reports", { unfiled: "true", tag, source_domain: sourceDomain, status, skill_name: skillName })}">Unfiled</a>
+          <a href="${buildHash("/reports", { unfiled: "true", tag, source_domain: sourceDomain, status, skill_name: skillName })}">未归档</a>
         </li>
         ${folders.map((f) => `
           <li class="folder-nav-item ${folderId === f.folder_id ? "active" : ""}" data-folder-id="${escapeHtml(f.folder_id)}">
@@ -1079,6 +1157,403 @@ async function renderReportsView(route) {
   _bindFolderNavEvents(folders, folderId, unfiled, { tag, source_domain: sourceDomain, status, skill_name: skillName });
 }
 
+async function renderReportsAtlasView(route) {
+  const q = route.params.get("q") || "";
+  const page = Number(route.params.get("page") || "1");
+  const tag = route.params.get("tag") || "";
+  const sourceDomain = route.params.get("source_domain") || "";
+  const status = route.params.get("status") || "";
+  const skillName = route.params.get("skill_name") || "";
+  const folderId = route.params.get("folder_id") || "";
+  const unfiled = route.params.get("unfiled") === "true";
+
+  const [listData, tagsData, domainsData, foldersData] = await Promise.all([
+    q
+      ? apiGet(`/api/search?${serializeParams({ q, tag, source_domain: sourceDomain, status, skill_name: skillName, limit: 24 })}`)
+      : apiGet(
+          `/api/reports?${serializeParams({
+            page,
+            page_size: 18,
+            tag,
+            source_domain: sourceDomain,
+            status,
+            skill_name: skillName,
+            folder_id: folderId || undefined,
+            unfiled: unfiled || undefined,
+          })}`
+        ),
+    apiGet("/api/tags"),
+    apiGet("/api/domains"),
+    apiGet("/api/report-folders"),
+  ]);
+
+  const folders = foldersData.items || [];
+  const items = listData.items || [];
+  const currentFolder = folders.find((folder) => folder.folder_id === folderId) || null;
+  const quickTags = (tagsData.items || []).slice(0, 8);
+  const quickDomains = (domainsData.items || []).slice(0, 6);
+  const filterBaseParams = {
+    q: q || undefined,
+    tag: tag || undefined,
+    source_domain: sourceDomain || undefined,
+    status: status || undefined,
+    skill_name: skillName || undefined,
+    folder_id: folderId || undefined,
+    unfiled: unfiled || undefined,
+  };
+
+  const activeFilters = [
+    q
+      ? {
+          label: `搜索词：${q}`,
+          href: buildHash("/reports", {
+            tag: tag || undefined,
+            source_domain: sourceDomain || undefined,
+            status: status || undefined,
+            skill_name: skillName || undefined,
+            folder_id: folderId || undefined,
+            unfiled: unfiled || undefined,
+          }),
+        }
+      : null,
+    tag
+      ? {
+          label: `标签：${tag}`,
+          href: buildHash("/reports", {
+            q: q || undefined,
+            source_domain: sourceDomain || undefined,
+            status: status || undefined,
+            skill_name: skillName || undefined,
+            folder_id: folderId || undefined,
+            unfiled: unfiled || undefined,
+          }),
+        }
+      : null,
+    sourceDomain
+      ? {
+          label: `来源域名：${sourceDomain}`,
+          href: buildHash("/reports", {
+            q: q || undefined,
+            tag: tag || undefined,
+            status: status || undefined,
+            skill_name: skillName || undefined,
+            folder_id: folderId || undefined,
+            unfiled: unfiled || undefined,
+          }),
+        }
+      : null,
+    status
+      ? {
+          label: `状态：${status}`,
+          href: buildHash("/reports", {
+            q: q || undefined,
+            tag: tag || undefined,
+            source_domain: sourceDomain || undefined,
+            skill_name: skillName || undefined,
+            folder_id: folderId || undefined,
+            unfiled: unfiled || undefined,
+          }),
+        }
+      : null,
+    skillName
+      ? {
+          label: `技能：${skillName}`,
+          href: buildHash("/reports", {
+            q: q || undefined,
+            tag: tag || undefined,
+            source_domain: sourceDomain || undefined,
+            status: status || undefined,
+            folder_id: folderId || undefined,
+            unfiled: unfiled || undefined,
+          }),
+        }
+      : null,
+    currentFolder
+      ? {
+          label: `文件夹：${currentFolder.folder_name}`,
+          href: buildHash("/reports", {
+            q: q || undefined,
+            tag: tag || undefined,
+            source_domain: sourceDomain || undefined,
+            status: status || undefined,
+            skill_name: skillName || undefined,
+          }),
+        }
+      : null,
+    unfiled
+      ? {
+          label: "范围：未归档",
+          href: buildHash("/reports", {
+            q: q || undefined,
+            tag: tag || undefined,
+            source_domain: sourceDomain || undefined,
+            status: status || undefined,
+            skill_name: skillName || undefined,
+          }),
+        }
+      : null,
+  ].filter(Boolean);
+
+  const metrics = [
+    {
+      eyebrow: q ? "搜索命中" : "当前报告",
+      value: q ? items.length : listData.total || items.length,
+      note: q ? `关键词“${q}”` : "当前工作区",
+    },
+    {
+      eyebrow: "文件夹",
+      value: folders.length,
+      note: currentFolder ? currentFolder.folder_name : unfiled ? "仅看未归档" : "全部集合",
+    },
+    {
+      eyebrow: "来源域名",
+      value: new Set(items.map((item) => item.source_domain).filter(Boolean)).size,
+      note: items[0]?.source_domain || "暂无来源",
+    },
+    {
+      eyebrow: "最近更新",
+      value: items[0]?.generated_at ? formatDateTime(items[0].generated_at) : "-",
+      note: items[0]?.title || "等待报告入库",
+    },
+  ];
+
+  const folderNav = `
+    <nav class="folder-nav panel report-folder-panel">
+      <div class="folder-nav-header report-folder-header">
+        <div>
+          <p class="eyebrow">文件夹</p>
+          <strong class="report-folder-title">归档分组</strong>
+        </div>
+        <button class="ghost-button" id="new-folder-btn" type="button">+ 新建</button>
+      </div>
+      <ul class="folder-nav-list report-folder-list">
+        <li class="${!folderId && !unfiled ? "active" : ""}">
+          <a href="${buildHash("/reports", {
+            q: q || undefined,
+            tag: tag || undefined,
+            source_domain: sourceDomain || undefined,
+            status: status || undefined,
+            skill_name: skillName || undefined,
+          })}">全部报告</a>
+          <span class="folder-count subtle">${listData.total || items.length}</span>
+        </li>
+        <li class="folder-nav-item ${unfiled ? "active" : ""}" data-folder-id="">
+          <a href="${buildHash("/reports", {
+            q: q || undefined,
+            unfiled: "true",
+            tag: tag || undefined,
+            source_domain: sourceDomain || undefined,
+            status: status || undefined,
+            skill_name: skillName || undefined,
+          })}">未归档</a>
+          <span class="folder-count subtle">${items.filter((item) => !item.folder_id_ref).length}</span>
+        </li>
+        ${folders
+          .map(
+            (folder) => `
+              <li class="folder-nav-item ${folderId === folder.folder_id ? "active" : ""}" data-folder-id="${escapeHtml(folder.folder_id)}">
+                <a href="${buildHash("/reports", {
+                  q: q || undefined,
+                  folder_id: folder.folder_id,
+                  tag: tag || undefined,
+                  source_domain: sourceDomain || undefined,
+                  status: status || undefined,
+                  skill_name: skillName || undefined,
+                })}">${escapeHtml(folder.folder_name)}</a>
+                <span class="folder-count subtle">${folder.report_count}</span>
+                <span class="folder-actions">
+                  <button class="icon-btn" data-rename-folder="${escapeHtml(folder.folder_id)}" data-folder-name="${escapeHtml(folder.folder_name)}" title="重命名">✎</button>
+                  <button class="icon-btn" data-delete-folder="${escapeHtml(folder.folder_id)}" data-folder-name="${escapeHtml(folder.folder_name)}" title="删除">×</button>
+                </span>
+              </li>
+            `
+          )
+          .join("")}
+      </ul>
+    </nav>
+  `;
+
+  const renderReportCard = (item, variant = "standard") => {
+    const itemTags = (item.tags || []).slice(0, variant === "featured" ? 6 : 4);
+    const summary = q ? stripHtml(item.snippet || item.summary || "") : item.summary;
+    const sourceLink = item.source_url || item.source_ref;
+    const folderBadge = item.folder_name_ref ? chip(item.folder_name_ref, "neutral") : "";
+
+    return `
+      <article class="card report-card report-card-${variant}" draggable="true" data-report-id="${escapeHtml(item.report_id)}">
+        <div class="report-card-glow"></div>
+        <div class="meta-row report-card-badges">
+          ${badge(localizeLabel(item.status || "published"), toneForStatus(item.status))}
+          ${badge(localizeLabel(item.source_domain || "unknown"))}
+          ${badge(localizeLabel(item.skill_name || item.source_type || "report"))}
+          ${folderBadge}
+        </div>
+        <a class="report-card-anchor" href="${buildHash(`/reports/${encodeURIComponent(item.report_id)}`)}">
+          <div class="report-card-heading">
+            <span class="report-card-kicker">${escapeHtml(item.report_id)}</span>
+            <h3>${escapeHtml(item.title)}</h3>
+          </div>
+          <p class="report-card-summary text-block">${escapeHtml(summary || "暂无摘要。")}</p>
+        </a>
+        <div class="chip-row report-card-tags">${itemTags.map((value) => chip(value)).join("")}</div>
+        <div class="report-card-footer">
+          <div class="inline-list subtle report-card-meta">
+            <span>${escapeHtml(formatDateTime(item.generated_at))}</span>
+            <span>${escapeHtml(item.source_type || "report")}</span>
+          </div>
+          <div class="button-row report-card-actions">
+            <a class="soft-button" href="${buildHash(`/reports/${encodeURIComponent(item.report_id)}`)}">查看详情</a>
+            <a class="ghost-button" href="${buildHash(`/report-only/${encodeURIComponent(item.report_id)}`)}">详情页模式</a>
+            ${sourceLink ? `<a class="ghost-button" href="${escapeHtml(sourceLink)}" target="_blank" rel="noreferrer">打开来源</a>` : ""}
+            <button class="ghost-button" data-move-report="${escapeHtml(item.report_id)}" data-current-folder-id="${escapeHtml(item.folder_id_ref || "")}" data-report-title="${escapeHtml(item.title)}">移动</button>
+          </div>
+        </div>
+      </article>
+    `;
+  };
+
+  const featuredCard = !q && items[0] ? renderReportCard(items[0], "featured") : "";
+  const secondaryItems = q ? items : items.slice(1);
+  const cards = items.length
+    ? `
+        ${featuredCard ? `<section class="report-featured-shell">${featuredCard}</section>` : ""}
+        ${secondaryItems.length ? `<section class="report-gallery-grid">${secondaryItems.map((item) => renderReportCard(item)).join("")}</section>` : ""}
+      `
+    : `
+        <section class="empty-state report-empty-state">
+          <p class="eyebrow">报告</p>
+          <h3>当前筛选条件下没有匹配的报告。</h3>
+          <p class="page-copy">可以尝试放宽搜索条件、清空筛选，或先同步新的 Markdown 报告。</p>
+        </section>
+      `;
+
+  const toolbar = `
+    <section class="panel report-hero">
+      <div class="report-hero-copy">
+        <p class="eyebrow">报告视图</p>
+        <h2 class="report-hero-title">${q ? "报告搜索结果" : "报告中心"}</h2>
+        <p class="page-copy">${q ? `当前展示与“${escapeHtml(q)}”最相关的报告结果。` : "按文件夹、标签、来源和状态浏览报告，并可直接进入详情页。"} </p>
+      </div>
+      <div class="report-metric-grid">
+        ${metrics
+          .map(
+            (metric) => `
+              <article class="report-metric-card">
+                <span class="eyebrow">${escapeHtml(metric.eyebrow)}</span>
+                <strong>${escapeHtml(String(metric.value))}</strong>
+                <span class="subtle">${escapeHtml(metric.note)}</span>
+              </article>
+            `
+          )
+          .join("")}
+      </div>
+    </section>
+
+    <section class="panel report-filters-shell">
+      <div class="report-filters-head">
+        <div>
+          <p class="eyebrow">筛选器</p>
+          <h3>按条件筛选报告</h3>
+        </div>
+        ${
+          activeFilters.length
+            ? `<div class="chip-row report-active-filters">${activeFilters.map((filter) => `<a class="chip warn report-filter-chip" href="${filter.href}">${escapeHtml(filter.label)} ×</a>`).join("")}</div>`
+            : `<p class="subtle">当前没有生效的筛选条件。</p>`
+        }
+      </div>
+
+      <form class="toolbar report-filter-form" id="report-filters">
+        <label class="field">
+          <span class="field-label">搜索</span>
+          <input name="q" value="${escapeHtml(q)}" placeholder="标题、摘要或关键词" />
+        </label>
+        <label class="field">
+          <span class="field-label">标签</span>
+          <input list="tag-options" name="tag" value="${escapeHtml(tag)}" placeholder="例如 openclaw" />
+          <datalist id="tag-options">
+            ${quickTags.map((item) => `<option value="${escapeHtml(item.tag || "")}"></option>`).join("")}
+          </datalist>
+        </label>
+        <label class="field">
+          <span class="field-label">来源域名</span>
+          <input list="domain-options" name="source_domain" value="${escapeHtml(sourceDomain)}" placeholder="例如 zhihu.com" />
+          <datalist id="domain-options">
+            ${quickDomains.map((item) => `<option value="${escapeHtml(item.source_domain || "")}"></option>`).join("")}
+          </datalist>
+        </label>
+        <label class="field">
+          <span class="field-label">状态</span>
+          <select name="status">
+            <option value="">全部</option>
+            <option value="published" ${status === "published" ? "selected" : ""}>已发布</option>
+            <option value="draft" ${status === "draft" ? "selected" : ""}>草稿</option>
+          </select>
+        </label>
+        <label class="field">
+          <span class="field-label">技能</span>
+          <input name="skill_name" value="${escapeHtml(skillName)}" placeholder="例如 openclaw" />
+        </label>
+        <div class="button-row report-filter-actions">
+          <button class="button" type="submit">应用筛选</button>
+          <button class="ghost-button" type="button" data-reset>重置</button>
+        </div>
+      </form>
+
+      <div class="report-filter-rails">
+        <div class="report-filter-rail">
+          <span class="field-label">快捷标签</span>
+          <div class="chip-row">
+            ${quickTags
+              .map((item) => `<a class="chip report-filter-chip" href="${buildHash("/reports", { ...filterBaseParams, tag: item.tag || undefined, page: undefined })}">${escapeHtml(item.tag || "")}</a>`)
+              .join("")}
+          </div>
+        </div>
+        <div class="report-filter-rail">
+          <span class="field-label">快捷域名</span>
+          <div class="chip-row">
+            ${quickDomains
+              .map((item) => `<a class="chip report-filter-chip" href="${buildHash("/reports", { ...filterBaseParams, source_domain: item.source_domain || undefined, page: undefined })}">${escapeHtml(item.source_domain || "")}</a>`)
+              .join("")}
+          </div>
+        </div>
+      </div>
+    </section>
+  `;
+
+  const body = `
+    <div class="reports-workspace report-atlas-layout">
+      ${folderNav}
+      <div class="reports-main report-atlas-main">
+        <section class="report-section-head">
+          <div>
+            <p class="eyebrow">${q ? "搜索结果" : "报告列表"}</p>
+            <h3>${q ? `共 ${items.length} 篇匹配报告` : `当前共有 ${listData.total || items.length} 篇报告`}</h3>
+          </div>
+          <p class="subtle">${currentFolder ? "当前只展示该文件夹内的报告。" : unfiled ? "当前展示未归档报告。" : "当前混合展示全部文件夹和最新入库内容。"}</p>
+        </section>
+        ${cards}
+        ${q ? "" : renderPagination({ path: "/reports", page, pageSize: 18, total: listData.total || 0, params: { tag, source_domain: sourceDomain, status, skill_name: skillName, folder_id: folderId || undefined, unfiled: unfiled || undefined } })}
+      </div>
+    </div>
+  `;
+
+  appNode.innerHTML = renderPageShell({
+    eyebrow: "报告",
+    title: q ? "报告搜索" : "报告库",
+    copy: q ? `查看与“${q}”相关的报告结果。` : "集中浏览报告、文件夹和筛选条件。",
+    toolbar,
+    body,
+  });
+
+  bindHashForm("#report-filters", "/reports");
+  _bindFolderNavEvents(folders, folderId, unfiled, {
+    tag,
+    source_domain: sourceDomain,
+    status,
+    skill_name: skillName,
+  });
+}
+
 async function renderUploadsView(route) {
   if (route.detail) {
     await renderUploadDetail(route.detail);
@@ -1102,8 +1577,8 @@ async function renderUploadsView(route) {
           (item) => `
             <article class="card">
               <div class="meta-row">
-                ${badge(item.upload_status, toneForStatus(item.upload_status))}
-                ${badge(item.processing_stage, toneForStatus(item.processing_stage))}
+                ${badge(localizeLabel(item.upload_status), toneForStatus(item.upload_status))}
+                ${badge(localizeLabel(item.processing_stage), toneForStatus(item.processing_stage))}
                 ${badge(item.file_ext)}
               </div>
               <h3><a href="${buildHash(`/uploads/${encodeURIComponent(item.upload_id)}`)}">${escapeHtml(item.title || item.original_filename)}</a></h3>
@@ -1112,12 +1587,12 @@ async function renderUploadsView(route) {
                 <span>${escapeHtml(item.upload_id)}</span>
               </div>
               <div class="inline-list subtle">
-                <span>${escapeHtml(String(item.file_size_bytes))} bytes</span>
+                <span>${escapeHtml(String(item.file_size_bytes))} 字节</span>
                 <span>${escapeHtml(formatDateTime(item.updated_at))}</span>
               </div>
               ${
                 item.report_id_ref
-                  ? `<div class="button-row">${linkButton(buildHash(`/reports/${encodeURIComponent(item.report_id_ref)}`), "Open Report")}</div>`
+                  ? `<div class="button-row">${linkButton(buildHash(`/reports/${encodeURIComponent(item.report_id_ref)}`), "打开报告")}</div>`
                   : ""
               }
             </article>
@@ -1126,96 +1601,96 @@ async function renderUploadsView(route) {
         .join("")
     : `
       <section class="empty-state">
-        <p class="eyebrow">Uploads</p>
+        <p class="eyebrow">上传</p>
         <h3>还没有上传任务</h3>
-        <p class="page-copy">先上传一个文件，或者调整筛选条件后再看。</p>
+        <p class="page-copy">先上传一个文件，或者调整筛选条件后再查看。</p>
       </section>
     `;
 
   appNode.innerHTML = renderPageShell({
-    eyebrow: "Uploads",
-    title: "Upload Center",
+    eyebrow: "上传",
+    title: "上传中心",
     copy: "接收本地文件，跟踪处理状态，并把结果推进到标准报告链路。",
     toolbar: `
       <section class="panel" style="margin-bottom: 18px;">
         <form id="upload-form" class="upload-form-shell">
           <label class="upload-picker" for="upload-file-input">
-            <span class="upload-picker-eyebrow">File Intake</span>
-            <strong class="upload-picker-title">选择一个文件开始上传</strong>
+            <span class="upload-picker-eyebrow">文件接入</span>
+            <strong class="upload-picker-title">选择文件并开始上传</strong>
             <span class="upload-picker-copy">支持 txt、md、html、pdf、docx。上传后会进入抽取、报告生成和入库链路。</span>
-            <span class="upload-picker-button">Select Files</span>
-            <span class="upload-picked-name" id="upload-picked-name">No files selected</span>
+            <span class="upload-picker-button">选择文件</span>
+            <span class="upload-picked-name" id="upload-picked-name">尚未选择文件</span>
             <input id="upload-file-input" name="file" type="file" multiple required />
           </label>
           <div class="upload-form-grid">
           <label class="field">
-            <span class="field-label">Title</span>
-            <input name="title" placeholder="可选，默认用文件名" />
+            <span class="field-label">标题</span>
+            <input name="title" placeholder="可选，默认使用文件名" />
           </label>
           <label class="field">
-            <span class="field-label">Compile Mode</span>
+            <span class="field-label">编译模式</span>
             <select name="compile_mode">
-              <option value="">none</option>
+              <option value="">不编译</option>
               <option value="propose">propose</option>
               <option value="apply_safe">apply_safe</option>
             </select>
           </label>
           <label class="field">
-            <span class="field-label">Auto Process</span>
+            <span class="field-label">自动处理</span>
             <select name="auto_process">
-              <option value="true">true</option>
-              <option value="false">false</option>
+              <option value="true">是</option>
+              <option value="false">否</option>
             </select>
           </label>
           <label class="field">
-            <span class="field-label">Auto Compile</span>
+            <span class="field-label">自动编译</span>
             <select name="auto_compile">
-              <option value="false">false</option>
-              <option value="true">true</option>
+              <option value="false">否</option>
+              <option value="true">是</option>
             </select>
           </label>
           <label class="field">
             <span class="field-label">目标文件夹</span>
             <select name="folder_id">
-              <option value="">-- 不归档 (Unfiled) --</option>
+              <option value="">-- 不归档（未归档） --</option>
               ${folders.map((f) => `<option value="${escapeHtml(f.folder_id)}">${escapeHtml(f.folder_name)}</option>`).join("")}
             </select>
           </label>
           </div>
           <div class="upload-form-actions">
-            <div class="upload-form-hint">建议默认使用 \`Auto Process = true\`，需要更保守时再关闭自动处理。</div>
+            <div class="upload-form-hint">建议默认开启“自动处理”，只有需要更保守地分步执行时再手动关闭。</div>
             <div class="button-row">
-              <button class="button" type="submit">Upload File</button>
+              <button class="button" type="submit">上传文件</button>
             </div>
           </div>
         </form>
       </section>
       <form class="toolbar panel" id="upload-filters">
         <label class="field">
-          <span class="field-label">Keyword</span>
+          <span class="field-label">关键词</span>
           <input name="q" value="${escapeHtml(q)}" placeholder="文件名 / 标题 / source_ref" />
         </label>
         <label class="field">
-          <span class="field-label">Status</span>
+          <span class="field-label">状态</span>
           <select name="status">
-            <option value="">All</option>
+            <option value="">全部</option>
             ${["uploaded", "queued", "processing", "completed", "failed", "needs_review"]
-              .map((value) => `<option value="${value}" ${status === value ? "selected" : ""}>${value}</option>`)
+              .map((value) => `<option value="${value}" ${status === value ? "selected" : ""}>${localizeLabel(value)}</option>`)
               .join("")}
           </select>
         </label>
         <label class="field">
-          <span class="field-label">Stage</span>
+          <span class="field-label">阶段</span>
           <select name="stage">
-            <option value="">All</option>
+            <option value="">全部</option>
             ${["received", "stored", "extracting", "normalizing", "summarizing", "report_generating", "syncing", "compiling", "done", "error"]
-              .map((value) => `<option value="${value}" ${stage === value ? "selected" : ""}>${value}</option>`)
+              .map((value) => `<option value="${value}" ${stage === value ? "selected" : ""}>${localizeLabel(value)}</option>`)
               .join("")}
           </select>
         </label>
         <div class="button-row">
-          <button class="button" type="submit">Apply</button>
-          <button class="ghost-button" type="button" data-reset>Reset</button>
+          <button class="button" type="submit">应用筛选</button>
+          <button class="ghost-button" type="button" data-reset>重置</button>
         </div>
       </form>
     `,
@@ -1235,14 +1710,14 @@ async function renderUploadsView(route) {
       return;
     }
     if (!files.length) {
-      uploadPickedName.textContent = "No files selected";
+      uploadPickedName.textContent = "尚未选择文件";
       uploadPickedName.classList.remove("has-file");
       return;
     }
     const label =
       files.length === 1
-        ? `${files[0].name} | ${files[0].size} bytes`
-        : `${files.length} files selected | ${files.slice(0, 3).map((file) => file.name).join(", ")}${files.length > 3 ? ", ..." : ""}`;
+        ? `${files[0].name} | ${files[0].size} 字节`
+        : `已选择 ${files.length} 个文件 | ${files.slice(0, 3).map((file) => file.name).join(", ")}${files.length > 3 ? ", ..." : ""}`;
     uploadPickedName.textContent = label;
     uploadPickedName.classList.add("has-file");
   });
@@ -1262,12 +1737,12 @@ async function renderUploadsView(route) {
     const autoCompile = String(form.querySelector('[name="auto_compile"]')?.value || "false");
     const folderIdVal = String(form.querySelector('[name="folder_id"]')?.value || "").trim();
     const submitButton = form.querySelector('button[type="submit"]');
-    const previousButtonText = submitButton?.textContent || "Upload Files";
+    const previousButtonText = submitButton?.textContent || "上传文件";
 
     try {
       if (submitButton) {
         submitButton.disabled = true;
-        submitButton.textContent = files.length > 1 ? `Uploading ${files.length} files...` : "Uploading...";
+        submitButton.textContent = files.length > 1 ? `正在上传 ${files.length} 个文件...` : "正在上传...";
       }
 
       const successes = [];
@@ -1292,7 +1767,7 @@ async function renderUploadsView(route) {
           const result = await apiPostForm("/api/uploads", formData);
           successes.push(result);
         } catch (error) {
-          failures.push(`${file.name}: ${error.message || "upload failed"}`);
+          failures.push(`${file.name}: ${error.message || "上传失败。"}`);
         }
       }
 
@@ -1302,15 +1777,15 @@ async function renderUploadsView(route) {
 
       form.reset();
       if (uploadPickedName) {
-        uploadPickedName.textContent = "No files selected";
+        uploadPickedName.textContent = "尚未选择文件";
         uploadPickedName.classList.remove("has-file");
       }
 
       if (failures.length) {
-        showToast(`Created ${successes.length} upload job(s), ${failures.length} failed.`, "warn");
+        showToast(`已创建 ${successes.length} 个上传任务，${failures.length} 个失败。`, "warn");
       } else {
         showToast(
-          successes.length === 1 ? "Upload job created." : `Created ${successes.length} upload jobs.`,
+          successes.length === 1 ? "上传任务已创建。" : `已创建 ${successes.length} 个上传任务。`,
           "good"
         );
       }
@@ -1318,7 +1793,7 @@ async function renderUploadsView(route) {
       const latestUpload = successes[successes.length - 1];
       location.hash = buildHash(`/uploads/${encodeURIComponent(latestUpload.upload_id)}`);
     } catch (error) {
-      showToast(error.message || "Upload failed.", "bad");
+      showToast(error.message || "上传失败。", "bad");
     } finally {
       if (submitButton) {
         submitButton.disabled = false;
@@ -1350,86 +1825,86 @@ async function renderUploadDetail(uploadId) {
           `
         )
         .join("")
-    : `<p class="subtle">No artifacts yet.</p>`;
+    : `<p class="subtle">还没有产物。</p>`;
 
   appNode.innerHTML = renderPageShell({
-    eyebrow: "Uploads / Detail",
+    eyebrow: "上传 / 详情",
     title: data.title || data.original_filename,
     copy: data.source_ref,
     body: `
       <div class="button-row" style="margin-bottom: 16px;">
-        ${linkButton(buildHash("/uploads"), "返回 Upload 列表")}
-        ${data.report_id_ref ? linkButton(buildHash(`/reports/${encodeURIComponent(data.report_id_ref)}`), "Open Report") : ""}
-        ${data.upload_status !== "completed" ? `<button class="button" id="process-upload" type="button">Process</button>` : ""}
-        ${["failed", "needs_review"].includes(data.upload_status) ? `<button class="ghost-button" id="retry-upload" type="button">Retry</button>` : ""}
+        ${linkButton(buildHash("/uploads"), "返回上传列表")}
+        ${data.report_id_ref ? linkButton(buildHash(`/reports/${encodeURIComponent(data.report_id_ref)}`), "打开报告") : ""}
+        ${data.upload_status !== "completed" ? `<button class="button" id="process-upload" type="button">开始处理</button>` : ""}
+        ${["failed", "needs_review"].includes(data.upload_status) ? `<button class="ghost-button" id="retry-upload" type="button">重试</button>` : ""}
       </div>
       <section class="detail-grid">
         <article class="detail-shell">
           <div class="meta-row">
-            ${badge(data.upload_status, toneForStatus(data.upload_status))}
-            ${badge(data.processing_stage, toneForStatus(data.processing_stage))}
+            ${badge(localizeLabel(data.upload_status), toneForStatus(data.upload_status))}
+            ${badge(localizeLabel(data.processing_stage), toneForStatus(data.processing_stage))}
             ${badge(data.file_ext)}
           </div>
           <div class="report-info-grid" style="margin-top: 12px;">
             <div class="meta-block meta-block-compact report-info-card">
               <div class="inline-kv inline-kv-compact">
-                <strong>Upload ID</strong>
+                <strong>上传 ID</strong>
                 <code>${escapeHtml(data.upload_id)}</code>
               </div>
             </div>
             <div class="meta-block meta-block-compact report-info-card">
               <div class="inline-kv inline-kv-compact">
-                <strong>File Size</strong>
-                <span>${escapeHtml(String(data.file_size_bytes))} bytes</span>
+                <strong>文件大小</strong>
+                <span>${escapeHtml(String(data.file_size_bytes))} 字节</span>
               </div>
             </div>
             <div class="meta-block meta-block-compact report-info-card">
               <div class="inline-kv inline-kv-compact">
-                <strong>Created</strong>
+                <strong>创建时间</strong>
                 <span>${escapeHtml(formatDateTime(data.created_at))}</span>
               </div>
             </div>
             <div class="meta-block meta-block-compact report-info-card">
               <div class="inline-kv inline-kv-compact">
-                <strong>Updated</strong>
+                <strong>更新时间</strong>
                 <span>${escapeHtml(formatDateTime(data.updated_at))}</span>
               </div>
             </div>
             <div class="meta-block meta-block-compact report-info-card report-info-card-wide">
               <div class="inline-kv inline-kv-compact">
-                <strong>Storage Path</strong>
+                <strong>存储路径</strong>
                 <code>${escapeHtml(data.storage_path)}</code>
               </div>
             </div>
           </div>
           ${
             data.error_message
-              ? `<div class="meta-block" style="margin-top: 14px;"><div class="inline-kv"><strong>Error</strong><span>${escapeHtml(data.error_code || "error")} | ${escapeHtml(data.error_message)}</span></div></div>`
+              ? `<div class="meta-block" style="margin-top: 14px;"><div class="inline-kv"><strong>错误</strong><span>${escapeHtml(localizeLabel(data.error_code || "error"))} | ${escapeHtml(data.error_message)}</span></div></div>`
               : ""
           }
           <section style="margin-top: 18px;">
-            <h3>Raw Preview</h3>
-            <pre class="document-raw"><code>${escapeHtml(rawText || "No raw preview yet.")}</code></pre>
+            <h3>原文预览</h3>
+            <pre class="document-raw"><code>${escapeHtml(rawText || "暂无原文预览。")}</code></pre>
           </section>
           <section style="margin-top: 18px;">
-            <h3>Report Preview</h3>
-            <pre class="document-raw"><code>${escapeHtml(reportPreview || "No report preview yet.")}</code></pre>
+            <h3>报告预览</h3>
+            <pre class="document-raw"><code>${escapeHtml(reportPreview || "暂无报告预览。")}</code></pre>
           </section>
         </article>
         <aside class="detail-stack">
           <section class="detail-shell">
-            <h3>Processing</h3>
+            <h3>处理信息</h3>
             <div class="detail-stack">
-              <div class="meta-block"><div class="inline-kv"><strong>Source Type</strong><span>${escapeHtml(data.source_type)}</span></div></div>
-              <div class="meta-block"><div class="inline-kv"><strong>Folder</strong><span>${escapeHtml(data.folder_name_ref || "Unfiled")}</span></div></div>
-              <div class="meta-block"><div class="inline-kv"><strong>Auto Process</strong><span>${escapeHtml(String(data.auto_process))}</span></div></div>
-              <div class="meta-block"><div class="inline-kv"><strong>Auto Compile</strong><span>${escapeHtml(String(data.auto_compile))}</span></div></div>
-              <div class="meta-block"><div class="inline-kv"><strong>Compile Mode</strong><span>${escapeHtml(data.compile_mode || "-")}</span></div></div>
-              <div class="meta-block"><div class="inline-kv"><strong>Report</strong><span>${data.report_id_ref ? `<a href="${buildHash(`/reports/${encodeURIComponent(data.report_id_ref)}`)}">${escapeHtml(data.report_id_ref)}</a>` : "-"}</span></div></div>
+              <div class="meta-block"><div class="inline-kv"><strong>来源类型</strong><span>${escapeHtml(localizeLabel(data.source_type))}</span></div></div>
+              <div class="meta-block"><div class="inline-kv"><strong>文件夹</strong><span>${escapeHtml(data.folder_name_ref || "未归档")}</span></div></div>
+              <div class="meta-block"><div class="inline-kv"><strong>自动处理</strong><span>${escapeHtml(localizeLabel(String(data.auto_process)))}</span></div></div>
+              <div class="meta-block"><div class="inline-kv"><strong>自动编译</strong><span>${escapeHtml(localizeLabel(String(data.auto_compile)))}</span></div></div>
+              <div class="meta-block"><div class="inline-kv"><strong>编译模式</strong><span>${escapeHtml(data.compile_mode || "-")}</span></div></div>
+              <div class="meta-block"><div class="inline-kv"><strong>关联报告</strong><span>${data.report_id_ref ? `<a href="${buildHash(`/reports/${encodeURIComponent(data.report_id_ref)}`)}">${escapeHtml(data.report_id_ref)}</a>` : "-"}</span></div></div>
             </div>
           </section>
           <section class="detail-shell">
-            <h3>Artifacts</h3>
+            <h3>处理产物</h3>
             <div class="detail-stack">${artifacts}</div>
           </section>
         </aside>
@@ -1440,20 +1915,20 @@ async function renderUploadDetail(uploadId) {
   document.querySelector("#process-upload")?.addEventListener("click", async () => {
     try {
       await apiPost(`/api/uploads/${encodeURIComponent(uploadId)}/process`, {});
-      showToast("Upload processing completed.", "good");
+      showToast("上传处理已完成。", "good");
       await renderUploadDetail(uploadId);
     } catch (error) {
-      showToast(error.message || "Process failed.", "bad");
+      showToast(error.message || "处理失败。", "bad");
     }
   });
 
   document.querySelector("#retry-upload")?.addEventListener("click", async () => {
     try {
       await apiPost(`/api/uploads/${encodeURIComponent(uploadId)}/retry`, {});
-      showToast("Upload retry completed.", "good");
+      showToast("上传重试已完成。", "good");
       await renderUploadDetail(uploadId);
     } catch (error) {
-      showToast(error.message || "Retry failed.", "bad");
+      showToast(error.message || "重试失败。", "bad");
     }
   });
 }
@@ -1478,10 +1953,10 @@ async function renderReportDetail(reportId) {
           `
         )
         .join("")
-    : `<p class="subtle">No extracted links.</p>`;
+    : `<p class="subtle">没有提取到外链。</p>`;
 
   appNode.innerHTML = renderPageShell({
-    eyebrow: "Reports / Detail",
+    eyebrow: "报告 / 详情",
     title: data.title,
     copy: data.summary,
     body: `
@@ -1497,43 +1972,43 @@ async function renderReportDetail(reportId) {
         <aside class="detail-stack">
           <section class="detail-shell detail-meta report-detail-meta">
             <div class="meta-row">
-              ${badge(data.status, toneForStatus(data.status))}
+              ${badge(localizeLabel(data.status), toneForStatus(data.status))}
               ${badge(data.source_domain)}
-              ${badge(data.skill_name)}
+              ${badge(localizeLabel(data.skill_name))}
             </div>
             <div class="report-info-grid">
               <div class="meta-block meta-block-compact report-info-card">
                 <div class="inline-kv inline-kv-compact">
-                  <strong>Report ID</strong>
+                  <strong>报告 ID</strong>
                   <code>${escapeHtml(data.report_id)}</code>
                 </div>
               </div>
               <div class="meta-block meta-block-compact report-info-card">
                 <div class="inline-kv inline-kv-compact">
-                  <strong>Generated At</strong>
+                  <strong>生成时间</strong>
                   <span>${escapeHtml(formatDateTime(data.generated_at))}</span>
                 </div>
               </div>
               <div class="meta-block meta-block-compact report-info-card">
                 <div class="inline-kv inline-kv-compact">
-                  <strong>Updated At</strong>
+                  <strong>更新时间</strong>
                   <span>${escapeHtml(formatDateTime(data.updated_at))}</span>
                 </div>
               </div>
               <div class="meta-block meta-block-compact report-info-card report-info-card-wide">
                 <div class="inline-kv inline-kv-compact">
-                  <strong>Source Ref</strong>
+                  <strong>来源标识</strong>
                   <code>${escapeHtml(data.source_ref)}</code>
                 </div>
               </div>
             </div>
             <div class="report-tag-panel">
-              <p class="field-label">Tags</p>
+              <p class="field-label">标签</p>
               <div class="chip-row report-tag-row">${(data.tags || []).map((value) => chip(value)).join("")}</div>
             </div>
           </section>
           <section class="detail-shell">
-            <h3>Extracted Links</h3>
+            <h3>提取出的外链</h3>
             <div class="detail-stack">${links}</div>
           </section>
         </aside>
@@ -1548,8 +2023,8 @@ async function renderReportDetail(reportId) {
       `
         <div class="meta-block meta-block-compact report-info-card report-info-card-wide">
           <div class="inline-kv inline-kv-compact">
-            <strong>Folder</strong>
-            <span>${escapeHtml(data.folder_name_ref || "Unfiled")}</span>
+            <strong>文件夹</strong>
+            <span>${escapeHtml(data.folder_name_ref || "未归档")}</span>
           </div>
         </div>
       `
@@ -1561,42 +2036,42 @@ async function renderReportDetail(reportId) {
 
   document
     .querySelector('.button-row[style="margin-bottom: 16px;"]')
-    ?.insertAdjacentHTML("beforeend", '<button class="ghost-button" id="delete-report-detail" type="button">Delete Report</button>');
+    ?.insertAdjacentHTML("beforeend", '<button class="ghost-button" id="delete-report-detail" type="button">删除报告</button>');
 
   document
     .querySelector('.button-row[style="margin-bottom: 16px;"]')
-    ?.insertAdjacentHTML("beforeend", '<button class="ghost-button" id="share-report-detail" type="button">Copy Share Link</button>');
+    ?.insertAdjacentHTML("beforeend", '<button class="ghost-button" id="share-report-detail" type="button">复制分享链接</button>');
 
   document.querySelector("#move-report-detail")?.addEventListener("click", async () => {
     try {
-      const targetFolderId = promptForFolderSelection(folders, data.folder_id_ref || null);
+      const targetFolderId = await promptForFolderSelection(folders, data.folder_id_ref || null);
       if (targetFolderId === undefined) return;
       await moveReportToFolder(reportId, targetFolderId, "已更新报告归档");
       await renderReportDetail(reportId);
     } catch (error) {
-      showToast(error.message || "Move failed.", "bad");
+      showToast(error.message || "移动失败。", "bad");
     }
   });
   document.querySelector("#delete-report-detail")?.addEventListener("click", async () => {
     const confirmed = window.confirm(
-      `Confirm delete "${data.title}"? The report will disappear immediately and files will be purged after 7 days.`
+      `确认删除“${data.title}”吗？报告会立刻从列表中消失，关联文件将在 7 天后清理。`
     );
     if (!confirmed) return;
     try {
       await apiRequest(`/api/reports/${encodeURIComponent(reportId)}`, { method: "DELETE" });
-      showToast("Report deleted.", "good");
+      showToast("报告已删除。", "good");
       location.hash = buildHash("/reports");
     } catch (error) {
-      showToast(error.message || "Delete failed.", "bad");
+      showToast(error.message || "删除失败。", "bad");
     }
   });
   document.querySelector("#share-report-detail")?.addEventListener("click", async () => {
     try {
       const result = await apiPost(`/api/reports/${encodeURIComponent(reportId)}/share`, {});
       await copyTextToClipboard(result.share_url);
-      showToast("Share link copied.", "good");
+      showToast("分享链接已复制。", "good");
     } catch (error) {
-      showToast(error.message || "Share link creation failed.", "bad");
+      showToast(error.message || "分享链接生成失败。", "bad");
     }
   });
 }
@@ -1624,7 +2099,7 @@ async function renderReportOnlyDetail(reportId, shareToken = "") {
           <a class="ghost-button" href="${buildHash(`/reports/${encodeURIComponent(data.report_id)}`)}">完整后台视图</a>
         </div>
         <div class="meta-row">
-          ${badge(data.status, toneForStatus(data.status))}
+              ${badge(localizeLabel(data.status), toneForStatus(data.status))}
           ${badge(data.source_domain)}
           ${badge(data.skill_name)}
         </div>
