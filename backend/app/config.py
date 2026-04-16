@@ -8,11 +8,32 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+from .resources import SOURCE_ROOT
 
-PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
-# Load .env file from project root
-load_dotenv(PROJECT_ROOT / ".env")
+def _resolve_runtime_root() -> Path:
+    raw_value = os.getenv("PERSONAL_LAB_HOME", "").strip()
+    if raw_value:
+        candidate = Path(os.path.expandvars(raw_value))
+        if not candidate.is_absolute():
+            candidate = Path.cwd() / candidate
+        return candidate.resolve()
+
+    if (SOURCE_ROOT / "frontend").exists() and (SOURCE_ROOT / "backend").exists():
+        return SOURCE_ROOT.resolve()
+
+    return (Path.cwd() / ".personal_lab").resolve()
+
+
+RUNTIME_ROOT = _resolve_runtime_root()
+
+for dotenv_path in (
+    SOURCE_ROOT / ".env",
+    Path.cwd() / ".env",
+    RUNTIME_ROOT / ".env",
+):
+    if dotenv_path.exists():
+        load_dotenv(dotenv_path, override=False)
 
 
 def _resolve_path(env_name: str, default_relative: str) -> Path:
@@ -20,9 +41,9 @@ def _resolve_path(env_name: str, default_relative: str) -> Path:
     if raw_value:
         candidate = Path(raw_value)
         if not candidate.is_absolute():
-            candidate = PROJECT_ROOT / candidate
+            candidate = RUNTIME_ROOT / candidate
     else:
-        candidate = PROJECT_ROOT / default_relative
+        candidate = RUNTIME_ROOT / default_relative
     return candidate.resolve()
 
 
@@ -42,8 +63,8 @@ def _resolve_additional_paths(env_name: str) -> list[Path]:
         if candidate.is_absolute():
             resolved = candidate.resolve()
         else:
-            # 相对路径：从 PROJECT_ROOT 计算
-            resolved = (PROJECT_ROOT / candidate).resolve()
+            # Relative path: resolve from runtime root.
+            resolved = (RUNTIME_ROOT / candidate).resolve()
         paths.append(resolved)
     return paths
 
@@ -62,7 +83,8 @@ def encode_report_storage_path(*, root: Path, relative_path: str, primary_root: 
 
 @dataclass(frozen=True)
 class Settings:
-    project_root: Path
+    source_root: Path
+    runtime_root: Path
     raw_root: Path
     raw_uploads_root: Path
     reports_root: Path
@@ -94,7 +116,8 @@ def get_settings() -> Settings:
     raw_root = _resolve_path("RAW_ROOT", "raw")
     uploads_root = _resolve_path("UPLOADS_ROOT", "uploads")
     return Settings(
-        project_root=PROJECT_ROOT,
+        source_root=SOURCE_ROOT,
+        runtime_root=RUNTIME_ROOT,
         raw_root=raw_root,
         raw_uploads_root=_resolve_path("RAW_UPLOADS_ROOT", str(raw_root / "uploads")),
         reports_root=_resolve_path("REPORTS_ROOT", "reports"),

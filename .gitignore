@@ -1,5 +1,14 @@
 __pycache__/
 *.pyc
+.venv/
+venv/
+env/
+*.egg-info/
+build/
+dist/
+.wheel_smoke/
+.wheel_smoke_ssp/
+.personal_lab/
 data/
 logs/
 .env

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import os
-from pathlib import Path
 
 from ..config import settings
+from ..resources import get_prompts_root
 
 
-PROMPTS_ROOT = Path(__file__).resolve().parents[3] / "prompts"
+PROMPTS_ROOT = get_prompts_root()
 
 
 class LLMUnavailableError(RuntimeError):
@@ -23,6 +23,8 @@ class LLMService:
         return bool(self.api_key)
 
     def load_prompt(self, prompt_key: str) -> str:
+        if PROMPTS_ROOT is None:
+            raise FileNotFoundError("prompt template root not found")
         prompt_path = PROMPTS_ROOT / f"{prompt_key}.md"
         if not prompt_path.exists():
             raise FileNotFoundError(f"prompt template not found: {prompt_key}")

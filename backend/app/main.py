@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .config import ensure_runtime_dirs, settings
 from .db import db_manager
+from .resources import get_frontend_root
 from .routers.auth import router as auth_router
 from .routers.health import router as health_router
 from .routers.compile import router as compile_router
@@ -45,8 +46,8 @@ app.include_router(wiki_router)
 app.include_router(compile_router)
 app.include_router(query_router)
 
-frontend_root = settings.project_root / "frontend"
-if frontend_root.exists():
+frontend_root = get_frontend_root()
+if frontend_root and frontend_root.exists():
     app.mount("/app", StaticFiles(directory=frontend_root, html=True), name="frontend")
 
 

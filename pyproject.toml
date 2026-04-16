@@ -1,0 +1,57 @@
+[build-system]
+requires = ["setuptools>=69", "wheel>=0.43"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "personal-lab-service"
+version = "0.1.0"
+description = "Report Center + LLM Wiki service for personal_lab."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+authors = [
+  { name = "personal_lab" }
+]
+dependencies = [
+  "fastapi>=0.115,<1.0",
+  "uvicorn>=0.30,<1.0",
+  "pydantic>=2.8,<3.0",
+  "python-multipart>=0.0.20,<1.0",
+  "pypdf>=6.0,<7.0",
+  "PyMuPDF>=1.27,<2.0",
+  "rapidocr-onnxruntime>=1.4,<2.0",
+  "python-docx>=1.1,<2.0",
+  "beautifulsoup4>=4.12,<5.0",
+  "python-dotenv>=1.0,<2.0",
+]
+
+[project.scripts]
+personal-lab-server = "backend.app.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["backend*"]
+
+[tool.setuptools.package-data]
+"backend.app" = ["sql/*.sql"]
+
+[tool.setuptools.data-files]
+"share/personal_lab/frontend" = [
+  "frontend/index.html",
+  "frontend/app.js",
+  "frontend/styles.css",
+]
+"share/personal_lab/prompts/compile" = [
+  "prompts/compile/extract_concepts.md",
+  "prompts/compile/extract_entities.md",
+  "prompts/compile/generate_page_proposal.md",
+]
+"share/personal_lab/prompts/lint" = [
+  "prompts/lint/detect_conflicts.md",
+]
+"share/personal_lab/prompts/query" = [
+  "prompts/query/answer_with_context.md",
+  "prompts/query/evaluate_writeback.md",
+]
